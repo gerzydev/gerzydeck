@@ -33,7 +33,8 @@ impl ActionRunner {
     /// Returns the macro thread handle when a macro was started.
     pub fn press(&self, key: u8, action: &Action) -> Option<JoinHandle<()>> {
         match action {
-            Action::None => {}
+            // plugin actions are routed to the plugin host by the engine, not executed here
+            Action::None | Action::Plugin { .. } => {}
             Action::Keys { codes } => {
                 let mut held = self.held.lock().unwrap();
                 if held.contains_key(&key) {
