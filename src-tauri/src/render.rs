@@ -93,6 +93,11 @@ fn shorten(label: &str) -> String {
     }
 }
 
+/// The bottom label of a key with a picture, exactly as on normal keys (plugin tiles use it too).
+pub fn draw_key_label(canvas: &mut RgbImage, label: &str) {
+    draw_label(canvas, label, true);
+}
+
 fn draw_label(canvas: &mut RgbImage, label: &str, with_image: bool) {
     let Some(font) = font() else {
         log::warn!("no system font found, skipping key label");

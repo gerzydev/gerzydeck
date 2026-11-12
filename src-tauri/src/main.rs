@@ -99,7 +99,7 @@ fn init_logging(dir: &std::path::Path) {
 fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
     use gerzys_deck::engine::Overlay;
     use gerzys_deck::plugins::image::{compose_tile, Align, TitleParams};
-    // live value from the plugin at the bottom (≈1.6× the SDK's 9 pt), user label small at the top
+    // live value from the plugin (≈1.6× the SDK's 9 pt); the user label sits at the bottom like on normal keys
     let (title, label) = match (&t.title, &t.label) {
         (Some(v), l) => (Some(v.clone()), l.clone()),
         (None, Some(l)) => (Some(l.clone()), None),
@@ -110,16 +110,14 @@ fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
     let align = match t.align.as_deref() {
         Some("top") => Align::Top,
         Some("middle") => Align::Middle,
+        // the bottom belongs to the user label when there is one
+        _ if label.is_some() => Align::Middle,
         _ => Align::Bottom,
     };
     let value = TitleParams { bold: true, size: t.size.unwrap_or(14).clamp(6, 40), align, ..TitleParams::default() };
     let mut canvas = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &value);
     if let Some(label) = label {
-        // the label takes the edge the value doesn't use
-        let label_align = if matches!(value.align, Align::Top) { Align::Bottom } else { Align::Top };
-        let top = TitleParams { bold: true, size: 9, align: label_align, ..TitleParams::default() };
-        let base = image::DynamicImage::ImageRgb8(canvas.clone()).to_rgba8();
-        canvas = compose_tile(Some(&base), t.bg, Some(&label), &top);
+        gerzys_deck::render::draw_key_label(&mut canvas, &label);
     }
     let mark = match t.overlay {
         Overlay::Ok => Some(("✓", [0x43, 0xc4, 0x6a])),
