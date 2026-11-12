@@ -99,9 +99,20 @@ fn init_logging(dir: &std::path::Path) {
 fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
     use gerzys_deck::engine::Overlay;
     use gerzys_deck::plugins::image::{compose_tile, Align, TitleParams};
-    let title = if t.missing { Some(format!("⚠ {}", t.title.clone().unwrap_or_default())) } else { t.title.clone() };
-    let params = TitleParams { bold: true, ..TitleParams::default() };
-    let mut canvas = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &params);
+    // live value from the plugin at the bottom (≈1.6× the SDK's 9 pt), user label small at the top
+    let (title, label) = match (&t.title, &t.label) {
+        (Some(v), l) => (Some(v.clone()), l.clone()),
+        (None, Some(l)) => (Some(l.clone()), None),
+        (None, None) => (None, None),
+    };
+    let title = if t.missing { Some(format!("⚠ {}", title.unwrap_or_default())) } else { title };
+    let bottom = TitleParams { bold: true, size: 14, ..TitleParams::default() };
+    let mut canvas = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &bottom);
+    if let Some(label) = label {
+        let top = TitleParams { bold: true, size: 9, align: Align::Top, ..TitleParams::default() };
+        let base = image::DynamicImage::ImageRgb8(canvas.clone()).to_rgba8();
+        canvas = compose_tile(Some(&base), t.bg, Some(&label), &top);
+    }
     let mark = match t.overlay {
         Overlay::Ok => Some(("✓", [0x43, 0xc4, 0x6a])),
         Overlay::Alert => Some(("⚠", [0xf2, 0xb8, 0x4b])),

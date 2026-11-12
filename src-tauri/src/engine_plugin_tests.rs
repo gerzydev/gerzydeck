@@ -35,7 +35,7 @@ fn render(spec: &KeySpec) -> Vec<u8> {
     format!("{}|{}", spec.label, spec.image.is_some()).into_bytes()
 }
 fn render_plugin(tile: &PluginTile) -> Vec<u8> {
-    format!("P|{:?}|{:?}|{}|{}", tile.title, tile.overlay, tile.image.is_some(), tile.missing).into_bytes()
+    format!("P|{:?}|{:?}|{:?}|{}|{}", tile.label, tile.title, tile.overlay, tile.image.is_some(), tile.missing).into_bytes()
 }
 
 fn cfg() -> Config {
@@ -206,7 +206,7 @@ fn image_flood_is_throttled_but_builtin_keys_stay_instant() {
     std::thread::sleep(Duration::from_millis(250));
     let mut all: Vec<String> = key3;
     all.extend(p.images().into_iter().filter(|(k, _)| *k == 3).map(|(_, s)| s));
-    assert_eq!(all.last().map(String::as_str), Some(r#"P|Some("49")|None|true|false"#), "latest frame wins");
+    assert_eq!(all.last().map(String::as_str), Some(r#"P|None|Some("49")|None|true|false"#), "latest frame wins");
 }
 
 #[test]
@@ -246,4 +246,23 @@ fn unknown_contexts_are_ignored() {
     p.plugin(PluginEvent::SetImage { context: "Z:3".into(), image: None, state: None });
     p.sync();
     assert_eq!(p.store.load().profiles[0].key(1).action, Action::Keys { codes: vec!["KeyQ".into()] });
+}
+
+#[test]
+fn user_label_and_live_plugin_title_are_both_rendered() {
+    let p = P::new();
+    p.connect();
+    p.images();
+    let (r, rx) = channel();
+    p.tx.send(Msg::GetConfig(r)).unwrap();
+    let mut c = rx.recv().unwrap();
+    c.profiles[0].keys.get_mut("3").unwrap().label = "CPU".into();
+    let (r, rx) = channel();
+    p.tx.send(Msg::SetConfig(serde_json::to_value(&c).unwrap(), r)).unwrap();
+    rx.recv().unwrap().unwrap();
+    std::thread::sleep(Duration::from_millis(120));
+    p.plugin(PluginEvent::SetTitle { context: "A:3".into(), title: Some("8%".into()), state: None });
+    std::thread::sleep(Duration::from_millis(150));
+    let last = p.images().into_iter().filter(|(k, _)| *k == 3).last().map(|(_, s)| s);
+    assert_eq!(last.as_deref(), Some(r#"P|Some("CPU")|Some("8%")|None|false|false"#));
 }

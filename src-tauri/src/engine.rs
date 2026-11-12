@@ -57,7 +57,10 @@ pub enum Overlay {
 #[derive(Debug, Clone, Default)]
 pub struct PluginTile {
     pub image: Option<Arc<RgbaImage>>,
+    /// live title from the plugin (shown at the bottom)
     pub title: Option<String>,
+    /// user label from the editor (shown at the top)
+    pub label: Option<String>,
     pub bg: [u8; 3],
     pub overlay: Overlay,
     /// plugin not installed: draw the label with a warning marker
@@ -343,7 +346,8 @@ impl Engine {
                     let view = self.views.get(&context);
                     let tile = PluginTile {
                         image: view.and_then(|v| PluginView::pick(&v.images, *state)),
-                        title: if cfg.label.is_empty() { view.and_then(|v| PluginView::pick(&v.titles, *state)) } else { Some(cfg.label.clone()) },
+                        title: view.and_then(|v| PluginView::pick(&v.titles, *state)),
+                        label: (!cfg.label.is_empty()).then(|| cfg.label.clone()),
                         bg: parse_hex(&cfg.bg),
                         overlay,
                         missing: self.missing_plugins.contains(p),
@@ -712,7 +716,7 @@ mod tests {
     }
 
     fn render_plugin(tile: &PluginTile) -> Vec<u8> {
-        format!("P|{:?}|{:?}|{}|{}", tile.title, tile.overlay, tile.image.is_some(), tile.missing).into_bytes()
+        format!("P|{:?}|{:?}|{:?}|{}|{}", tile.label, tile.title, tile.overlay, tile.image.is_some(), tile.missing).into_bytes()
     }
 
     fn seed() -> Config {

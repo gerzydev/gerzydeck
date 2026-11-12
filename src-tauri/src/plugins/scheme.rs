@@ -99,9 +99,23 @@ const BOOTSTRAP: &str = r#"<script>(function(){
       console.warn('gd bootstrap: connectElgatoStreamDeckSocket not defined');
     }
     if (window.parent !== window) {
-      var send = function () { window.parent.postMessage({ type: 'gd-pi-height', height: document.documentElement.scrollHeight }, '*'); };
+      // Elgato PIs assume a ~350 px wide window: never scroll sideways inside our panel
+      var st = document.createElement('style');
+      st.textContent = 'html,body{overflow-x:hidden!important;max-width:100%}';
+      document.head.appendChild(st);
+      // height of the real content (body is often height:100%, so scrollHeight would never shrink)
+      var contentHeight = function () {
+        var bottom = 0, kids = document.body ? document.body.children : [];
+        for (var i = 0; i < kids.length; i++) {
+          var r = kids[i].getBoundingClientRect();
+          if (r.height > 0) bottom = Math.max(bottom, r.bottom + window.scrollY);
+        }
+        return Math.ceil(bottom + 16);
+      };
+      var send = function () { window.parent.postMessage({ type: 'gd-pi-height', height: contentHeight() }, '*'); };
       send();
-      if (window.ResizeObserver) new ResizeObserver(send).observe(document.documentElement);
+      if (window.ResizeObserver) new ResizeObserver(send).observe(document.body || document.documentElement);
+      setInterval(send, 1000);
     }
   });
 })();</script>"#;

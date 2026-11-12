@@ -223,8 +223,14 @@ pub fn compose_tile(
     // Bound work and arithmetic for untrusted title settings; ordinary SDK sizes
     // retain their exact point-to-pixel scale.
     let title: String = title.chars().take(4096).collect();
-    let scale = ab_glyph::PxScale::from(params.size.min(256) as f32 * size as f32 / 72.0);
+    let mut scale = ab_glyph::PxScale::from(params.size.min(256) as f32 * size as f32 / 72.0);
     let lines: Vec<&str> = title.split('\n').take(size as usize).collect();
+    // shrink long lines to fit the tile width (keeps a margin for the outline)
+    let widest = lines.iter().map(|l| text_size(scale, font, l).0).max().unwrap_or(0) as f32;
+    let available = size as f32 - 8.0;
+    if widest > available {
+        scale = ab_glyph::PxScale::from((scale.y * available / widest).max(8.0));
+    }
     let line_height = scale.y.ceil() as i32 + 1;
     let block_height = line_height * lines.len() as i32;
     let y0 = match params.align {
@@ -293,6 +299,21 @@ mod tests {
         img.write_to(&mut bytes, ImageFormat::Png).unwrap();
         bytes.into_inner()
     }
+    /// Long live values ("16.2GB used of 32GB") must shrink to fit instead of overflowing.
+    #[test]
+    fn long_titles_shrink_to_fit_the_tile() {
+        let params = TitleParams { size: 16, color: [255; 3], ..TitleParams::default() };
+        let t = compose_tile(None, [0; 3], Some("16.2GB used of 32GB total"), &params);
+        let edge = crate::render::KEY_SIZE - 1;
+        for y in 0..=edge {
+            for x in [0, 1, edge - 1, edge] {
+                assert!(t.get_pixel(x, y)[0] < 128, "text touches the edge at ({x},{y})");
+            }
+        }
+        // still visible
+        assert!(t.pixels().any(|p| p[0] > 200));
+    }
+
     /// Real plugins send loosely formed data URLs; all of these must decode.
     #[test]
     fn lenient_data_urls_from_real_plugins() {
