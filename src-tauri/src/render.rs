@@ -74,7 +74,7 @@ pub fn normalize_upload(bytes: &[u8]) -> Result<Vec<u8>, RenderError> {
     Ok(out)
 }
 
-fn font() -> Option<&'static FontVec> {
+pub(crate) fn font() -> Option<&'static FontVec> {
     static FONT: OnceLock<Option<FontVec>> = OnceLock::new();
     FONT.get_or_init(|| {
         ["segoeuib.ttf", "arialbd.ttf", "segoeui.ttf", "arial.ttf"].iter().find_map(|name| {
@@ -178,6 +178,13 @@ pub fn render_key_jpeg(spec: &KeySpec) -> Vec<u8> {
     if !spec.label.is_empty() {
         draw_label(&mut canvas, &spec.label, has_image);
     }
+    round_corners(&mut canvas, CORNER_RADIUS);
+    encode_tile(&canvas)
+}
+
+/// Round a tile, then encode it for the device.
+pub fn tile_jpeg(canvas: &RgbImage) -> Vec<u8> {
+    let mut canvas = canvas.clone();
     round_corners(&mut canvas, CORNER_RADIUS);
     encode_tile(&canvas)
 }

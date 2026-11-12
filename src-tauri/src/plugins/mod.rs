@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod host;
 #[cfg(test)]
 mod host_tests;
+pub mod image;
 pub mod install;
 pub mod link;
 pub mod manifest;
