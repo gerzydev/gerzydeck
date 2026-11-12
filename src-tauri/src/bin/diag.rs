@@ -9,6 +9,12 @@ use std::sync::mpsc::channel;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(i) = args.iter().position(|a| a == "--text") {
+        use gerzys_deck::keyboard::{Keyboard, SendInputKeyboard};
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        SendInputKeyboard.type_text(args.get(i + 1).map(String::as_str).unwrap_or(""));
+        return;
+    }
     if args.iter().any(|a| a == "--type") {
         type_test();
         return;
@@ -47,5 +53,20 @@ fn main() {
 }
 
 fn type_test() {
-    eprintln!("--type přijde v kroku 5");
+    use gerzys_deck::keyboard::{Keyboard, SendInputKeyboard};
+    let kb = SendInputKeyboard;
+    println!("Za 3 s píšu do okna v popředí.");
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    let tap = |c: &str| {
+        kb.down(c);
+        kb.up(c);
+    };
+    kb.down("ShiftLeft");
+    tap("KeyH");
+    kb.up("ShiftLeft");
+    tap("KeyY");
+    tap("Digit1");
+    tap("Space");
+    kb.type_text("ěščř");
+    println!("Hotovo: na české klávesnici má být „Hz+ ěščř“.");
 }

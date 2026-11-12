@@ -4,3 +4,6 @@ pub mod device;
 pub mod scancodes;
 pub mod config;
 pub mod store;
+pub mod keyboard;
+pub mod runner;
+pub mod os;
