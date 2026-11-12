@@ -4,3 +4,9 @@ pub mod link;
 pub mod manifest;
 pub mod protocol;
 pub mod server;
+pub mod scheme;
+
+/// `%APPDATA%\GerzysDeck\plugins`
+pub fn plugins_dir() -> std::path::PathBuf {
+    crate::store::data_dir().join("plugins")
+}

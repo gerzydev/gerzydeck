@@ -181,6 +181,15 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .register_uri_scheme_protocol(gerzys_deck::plugins::scheme::SCHEME, |_ctx, request| {
+            let served = gerzys_deck::plugins::scheme::serve(&gerzys_deck::plugins::plugins_dir(), request.uri().path());
+            tauri::http::Response::builder()
+                .status(served.status)
+                .header("Content-Type", served.mime)
+                .header("Cache-Control", "no-store")
+                .body(served.body)
+                .unwrap_or_default()
+        })
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .setup(move |app| {
             let handle = app.handle().clone();
