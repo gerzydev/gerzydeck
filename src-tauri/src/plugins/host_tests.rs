@@ -81,7 +81,7 @@ struct H {
 
 fn ctx(settings: Value) -> KeyCtx {
     KeyCtx {
-        plugin: "com.fake.sdPlugin".into(),
+        plugin: "com.fake".into(),
         ctx: ActionCtx { action: "com.fake.act".into(), context: "A:3".into(), device: "D6-main".into(), key: 3, settings, state: 0 },
     }
 }
@@ -188,7 +188,7 @@ fn property_inspector_open_issues_a_token_and_url() {
     let (r, rx) = channel();
     h.tx.send(HostCmd::PiOpen { key: ctx(json!({"a": 1})), reply: r }).unwrap();
     let pi = rx.recv_timeout(Duration::from_secs(2)).unwrap().expect("pi info");
-    assert!(pi.url.starts_with("http://gdplugin.localhost/com.fake.sdPlugin/pi.html#gd="));
+    assert!(pi.url.starts_with("http://gdplugin.localhost/com.fake/pi.html#gd="));
     assert_eq!(pi.uuid.len(), 32);
     assert_eq!(pi.action_info["context"], "A:3");
     assert_eq!(pi.action_info["payload"]["settings"]["a"], 1);
@@ -199,9 +199,9 @@ fn property_inspector_open_issues_a_token_and_url() {
 fn global_settings_persist_across_hosts() {
     let dir = plugins_dir();
     let file = dir.join("plugin-settings.json");
-    std::fs::write(&file, r#"{"com.fake.sdPlugin": {"token": "saved"}}"#).unwrap();
+    std::fs::write(&file, r#"{"com.fake": {"token": "saved"}}"#).unwrap();
     let store = GlobalSettings::load(&file);
-    assert_eq!(store.get("com.fake.sdPlugin")["token"], "saved");
+    assert_eq!(store.get("com.fake")["token"], "saved");
     assert_eq!(store.get("other"), json!({}));
 }
 
@@ -214,22 +214,22 @@ fn list_reports_plugins_with_keypad_actions_and_status() {
     let list = rx.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(list.len(), 1);
     let p = &list[0];
-    assert_eq!(p.id, "com.fake.sdPlugin");
+    assert_eq!(p.id, "com.fake");
     assert_eq!(p.name, "Fake");
     assert_eq!(p.status, super::link::PluginStatus::Running);
     assert_eq!(p.actions[0].uuid, "com.fake.act");
-    assert!(p.icon.starts_with("http://gdplugin.localhost/com.fake.sdPlugin/icon"), "{}", p.icon);
+    assert!(p.icon.starts_with("http://gdplugin.localhost/com.fake/icon"), "{}", p.icon);
 }
 
 #[test]
 fn installing_a_missing_plugin_replays_its_actions() {
     let h = start();
     let mut missing = ctx(json!({ "x": 1 }));
-    missing.plugin = "com.later.sdPlugin".into();
+    missing.plugin = "com.later".into();
     missing.ctx.action = "com.later.act".into();
     missing.ctx.context = "A:5".into();
     h.tx.send(HostCmd::WillAppear(missing)).unwrap();
-    h.wait_event(|e| matches!(e, PluginEvent::Status { plugin, status: super::link::PluginStatus::NotInstalled } if plugin == "com.later.sdPlugin"));
+    h.wait_event(|e| matches!(e, PluginEvent::Status { plugin, status: super::link::PluginStatus::NotInstalled } if plugin == "com.later"));
     // "install" it: copy the fake plugin under the new id and ask the host to (re)load it
     let (r, rx) = channel();
     h.tx.send(HostCmd::ListPlugins(r)).unwrap();
@@ -237,7 +237,7 @@ fn installing_a_missing_plugin_replays_its_actions() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("manifest.json"), MANIFEST.replace("com.fake.act", "com.later.act")).unwrap();
     std::fs::write(dir.join("fake.exe"), "x").unwrap();
-    h.tx.send(HostCmd::Reload { id: "com.later.sdPlugin".into() }).unwrap();
+    h.tx.send(HostCmd::Reload { id: "com.later".into() }).unwrap();
     let appear = h.wait_got(|v| v["event"] == "willAppear" && v["context"] == "A:5");
     assert_eq!(appear["action"], "com.later.act");
     assert_eq!(*h.fake.launches.lock().unwrap(), 2);
@@ -247,7 +247,7 @@ fn installing_a_missing_plugin_replays_its_actions() {
 fn removing_a_plugin_stops_it_and_marks_actions_missing() {
     let h = start();
     h.tx.send(HostCmd::WillAppear(ctx(json!({})))).unwrap();
-    h.tx.send(HostCmd::Remove { id: "com.fake.sdPlugin".into() }).unwrap();
+    h.tx.send(HostCmd::Remove { id: "com.fake".into() }).unwrap();
     h.wait_event(|e| matches!(e, PluginEvent::Status { status: super::link::PluginStatus::NotInstalled, .. }));
-    assert!(h.fake.stopped.lock().unwrap().contains(&"com.fake.sdPlugin".to_string()));
+    assert!(h.fake.stopped.lock().unwrap().contains(&"com.fake".to_string()));
 }

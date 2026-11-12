@@ -19,18 +19,11 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 pub const DEVICE_ID: &str = "D6-main";
 const QUEUE_CAP: usize = 500;
 
-#[derive(Debug, Clone)]
-pub struct LoadedPlugin {
-    /// folder name, e.g. `com.elgato.cpu.sdPlugin`
-    pub id: String,
-    pub dir: PathBuf,
-    pub manifest: Manifest,
-}
+/// An installed plugin; `id` is the folder name without `.sdPlugin` (e.g. `com.elgato.cpu`).
+pub use super::install::InstalledPlugin as LoadedPlugin;
 
-impl LoadedPlugin {
-    pub fn supports_windows(&self) -> bool {
-        self.manifest.os.is_empty() || self.manifest.os.iter().any(|o| o.platform.eq_ignore_ascii_case("windows"))
-    }
+pub fn supports_windows(p: &LoadedPlugin) -> bool {
+    p.manifest.os.is_empty() || p.manifest.os.iter().any(|o| o.platform.eq_ignore_ascii_case("windows"))
 }
 
 /// Starts plugin programs (exe/node via the process supervisor, html via hidden webviews).
@@ -78,25 +71,9 @@ impl GlobalSettings {
     }
 }
 
-/// Every plugin folder with a readable manifest.
+/// Every installed plugin with a readable manifest.
 pub fn load_installed(plugins_dir: &Path) -> Vec<LoadedPlugin> {
-    let Ok(entries) = std::fs::read_dir(plugins_dir) else { return vec![] };
-    let mut out: Vec<LoadedPlugin> = entries
-        .flatten()
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| {
-            let dir = e.path();
-            match Manifest::load(&dir) {
-                Ok(manifest) => Some(LoadedPlugin { id: e.file_name().to_string_lossy().into_owned(), dir, manifest }),
-                Err(err) => {
-                    log::warn!("skipping plugin {}: {err}", dir.display());
-                    None
-                }
-            }
-        })
-        .collect();
-    out.sort_by(|a, b| a.id.cmp(&b.id));
-    out
+    super::install::list_installed(plugins_dir)
 }
 
 struct PluginRt {
@@ -152,14 +129,14 @@ impl Host {
     /// Loads one plugin folder, launches it and queues the state it must know about.
     fn start_plugin(&mut self, loaded: LoadedPlugin) {
         let id = loaded.id.clone();
-        if !loaded.supports_windows() {
+        if !supports_windows(&loaded) {
             log::warn!("plugin {id} does not support Windows");
             self.emit(PluginEvent::Status { plugin: id, status: PluginStatus::Unsupported });
             return;
         }
         let uuid = new_token();
         self.tokens.insert(uuid.clone(), Registrant::Plugin(id.clone()));
-        let plugin_uuid = loaded.manifest.uuid.clone().unwrap_or_else(|| id.trim_end_matches(".sdPlugin").to_string());
+        let plugin_uuid = loaded.manifest.uuid.clone().unwrap_or_else(|| id.clone());
         let info = info_json(DEVICE_ID, &plugin_uuid, loaded.manifest.version.as_deref().unwrap_or("1.0")).to_string();
         self.deps.launcher.start(&loaded, self.port, &uuid, &info);
         let mut queue = vec![];
@@ -299,7 +276,7 @@ impl Host {
             }
             HostCmd::Reload { id } => {
                 self.stop_plugin(&id);
-                let dir = self.deps.plugins_dir.join(&id);
+                let dir = self.deps.plugins_dir.join(format!("{id}.sdPlugin"));
                 match Manifest::load(&dir) {
                     Ok(manifest) => self.start_plugin(LoadedPlugin { id, dir, manifest }),
                     Err(e) => {
@@ -324,7 +301,7 @@ impl Host {
         let p = self.plugins.get(&key.plugin)?;
         let action = p.loaded.manifest.actions.iter().find(|a| a.uuid == key.ctx.action)?;
         let pi_path = action.property_inspector_path.clone().or_else(|| p.loaded.manifest.property_inspector_path.clone())?;
-        let plugin_uuid = p.loaded.manifest.uuid.clone().unwrap_or_else(|| key.plugin.trim_end_matches(".sdPlugin").to_string());
+        let plugin_uuid = p.loaded.manifest.uuid.clone().unwrap_or_else(|| key.plugin.clone());
         let info = info_json(DEVICE_ID, &plugin_uuid, p.loaded.manifest.version.as_deref().unwrap_or("1.0"));
         let context = key.ctx.context.clone();
         self.close_pi(&context);
