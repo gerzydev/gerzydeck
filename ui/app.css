@@ -196,3 +196,13 @@ code { font-family: var(--font-mono); color: var(--accent); font-size: 0.92em; u
 .deck-key.drop-target { box-shadow: 0 0 0 2px var(--ink-1), 0 0 0 4px var(--info); }
 .deck-key[draggable="true"] { cursor: grab; }
 .deck-key img { pointer-events: none; -webkit-user-drag: none; }
+
+/* action type picker */
+.act-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.act-tile { display: grid; justify-items: center; align-content: center; gap: 6px; min-height: 66px; padding: 10px 4px 8px; border: 0; border-radius: var(--r-md); background: var(--surface-1); box-shadow: var(--lit); color: var(--text-2); font-size: 12px; font-weight: 600; cursor: pointer; transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease); min-width: 0; }
+.act-tile svg.i { width: 20px; height: 20px; }
+.act-tile img { width: 22px; height: 22px; border-radius: 5px; object-fit: cover; }
+.act-tile span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
+.act-tile:hover { background: var(--surface-2); color: var(--text-1); }
+.act-tile.active { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.act-tile:focus-visible { outline: none; box-shadow: var(--focus); }

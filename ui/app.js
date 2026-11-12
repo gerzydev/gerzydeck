@@ -290,19 +290,19 @@ function renderEditor() {
           h('input', { class: 'rm-input', value: cfg.label, maxLength: 40, placeholder: 'např. Fireball', oninput: (e) => { cfg.label = e.target.value; refreshTile(k); save(); } })),
         h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Pozadí'),
           h('input', { class: 'rm-color', type: 'color', value: cfg.bg, oninput: (e) => { cfg.bg = e.target.value; refreshTile(k); save(); } }))),
-      h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Akce'),
-        h('select', { class: 'rm-select', onchange: async (e) => {
-          if (e.target.value === 'plugin') {
+      h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Akce'),
+        actionGrid(cfg, async (type) => {
+          if (type === 'plugin') {
             const pick = await pickPluginAction(ui);
-            if (!pick) { e.target.value = cfg.action.type; return; }
+            if (!pick) return;
             cfg.action = { type: 'plugin', plugin: pick.plugin, action: pick.action, settings: {}, state: 0 };
-            save(); renderDeck();
-            return;
+          } else {
+            if (type === cfg.action.type) return;
+            closePi(ui);
+            cfg.action = defaultAction(type);
           }
-          closePi(ui);
-          cfg.action = defaultAction(e.target.value); save(); refreshTile(k); redrawAction();
-        } },
-          ACTION_TYPES.map(([v, l]) => option(v, l, cfg.action.type)))),
+          save(); renderDeck();
+        })),
       actionBox,
       hintBox));
   redrawAction();
@@ -317,6 +317,37 @@ async function applyIcon(cfg, iconId) {
 }
 
 const iconSrc = (icon) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(icon.svg);
+
+const ACTION_ICONS = {
+  none: '<circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/>',
+  keys: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
+  macro: '<path d="M4 6h10M4 12h10M4 18h6"/><path d="M16 14.5l5 3.5-5 3.5z"/>',
+  launch: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  media: '<path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
+  system: '<path d="M12 3v8"/><path d="M6.3 6.6a8 8 0 1 0 11.4 0"/>',
+  profile: '<path d="M7 7h12l-3-3"/><path d="M17 17H5l3 3"/>',
+  plugin: '<path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/>',
+};
+const ACTION_SHORT = { none: 'Nic', keys: 'Klávesa', macro: 'Makro', launch: 'Spustit', media: 'Média', system: 'Systém', profile: 'Profil', plugin: 'Plugin' };
+
+/** 4×2 grid of action types; the Plugin tile shows the chosen plugin action. */
+function actionGrid(cfg, onPick) {
+  const current = cfg.action.type;
+  const pa = current === 'plugin' ? pluginAction(cfg.action.plugin, cfg.action.action) : null;
+  return h('div', { class: 'act-grid', role: 'radiogroup' },
+    Object.keys(ACTION_SHORT).map((type) => {
+      const active = type === current;
+      const usePluginIcon = type === 'plugin' && pa?.action?.icon;
+      const name = type === 'plugin' && pa?.action ? pa.action.name : ACTION_SHORT[type];
+      return h('button', {
+        class: `act-tile${active ? ' active' : ''}`, type: 'button', role: 'radio', 'aria-checked': String(active),
+        title: ACTION_TYPES.find(([v]) => v === type)?.[1].replace('…', '') ?? name,
+        onclick: () => onPick(type),
+      },
+      usePluginIcon ? h('img', { src: pa.action.icon, alt: '' }) : svgIcon(ACTION_ICONS[type]),
+      h('span', {}, name));
+    }));
+}
 
 function defaultAction(type) {
   switch (type) {
