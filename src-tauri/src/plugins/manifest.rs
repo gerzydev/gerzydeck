@@ -323,6 +323,23 @@ mod tests {
         fs::remove_dir_all(d).unwrap();
     }
     #[test]
+    fn keypad_actions_excludes_hidden_and_encoder_only() {
+        let (mut manifest, dir) = load_json(MINIMAL);
+        let mut hidden = manifest.actions[0].clone();
+        hidden.uuid = "hidden".into();
+        hidden.visible_in_action_list = false;
+        let mut encoder = manifest.actions[0].clone();
+        encoder.uuid = "encoder".into();
+        encoder.controllers = vec!["Encoder".into()];
+        let mut both = encoder.clone();
+        both.uuid = "both".into();
+        both.controllers.push("Keypad".into());
+        manifest.actions.extend([hidden, encoder, both]);
+        let ids: Vec<_> = manifest.keypad_actions().map(|a| a.uuid.as_str()).collect();
+        assert_eq!(ids, ["test.action", "both"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
     fn every_real_fixture_parses_has_keypad_and_expected_runtime() {
         for (id, kind, version) in [
             ("com.elgato.obsstudio", "html", ""),

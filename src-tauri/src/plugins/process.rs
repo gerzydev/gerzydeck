@@ -318,7 +318,7 @@ impl Default for SupervisorOptions {
             initial_backoff: Duration::from_secs(1),
             max_backoff: Duration::from_secs(60),
             stable_after: Duration::from_secs(60),
-            registration_timeout: Duration::from_secs(5),
+            registration_timeout: Duration::from_secs(30),
             poll_interval: Duration::from_millis(20),
         }
     }
@@ -492,6 +492,35 @@ impl Supervisor {
         }
     }
 }
+impl super::host::Launcher for Supervisor {
+    fn start(&mut self, plugin: &InstalledPlugin, port: u16, uuid: &str, info: &str) {
+        Supervisor::start(self, plugin, port, uuid, info);
+    }
+
+    fn stop(&mut self, id: &str) {
+        Supervisor::stop(self, id);
+    }
+
+    fn stop_all(&mut self) {
+        Supervisor::stop_all(self);
+    }
+
+    fn registered(&mut self, id: &str) {
+        self.mark_registered(id);
+    }
+
+    fn status(&self, id: &str) -> Option<super::link::PluginStatus> {
+        use super::link::PluginStatus as HostStatus;
+        match Supervisor::status(self, id) {
+            PluginStatus::Running => Some(HostStatus::Running),
+            PluginStatus::Starting => Some(HostStatus::Starting),
+            PluginStatus::Crashed { restarts } => Some(HostStatus::Crashed { restarts }),
+            PluginStatus::MissingNode => Some(HostStatus::MissingNode),
+            PluginStatus::Disabled => None,
+        }
+    }
+}
+
 impl Drop for Supervisor {
     fn drop(&mut self) {
         self.stop_all();
@@ -540,6 +569,7 @@ fn supervise(
             }
         };
         if matches!(runtime, Runtime::Node { .. }) && node.path().is_none() {
+            log::warn!("Plugin {} nelze spustit: chybí Node.js", plugin.id);
             set_status(&state, PluginStatus::MissingNode);
             return;
         }
@@ -904,6 +934,82 @@ mod tests {
         )
         .is_err());
         std::fs::remove_dir_all(p.dir).unwrap();
+    }
+    #[tokio::test]
+    async fn launcher_adapter_registers_and_stops_processes() {
+        use crate::plugins::{host::Launcher, link::PluginStatus as HostStatus};
+        let p = plugin();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut launcher: Box<dyn Launcher> = Box::new(Supervisor::with_options(
+            p.dir.join("logs"),
+            NodeResolver::with_path(None),
+            options(),
+        ));
+        assert_eq!(launcher.status(&p.id), None);
+        launcher.start(
+            &p,
+            listener.local_addr().unwrap().port(),
+            "adapter-token",
+            "{}",
+        );
+        let mut ws = connection(&listener).await;
+        assert_eq!(message(&mut ws).await["uuid"], "adapter-token");
+        assert_eq!(launcher.status(&p.id), Some(HostStatus::Starting));
+        launcher.registered(&p.id);
+        for _ in 0..100 {
+            if launcher.status(&p.id) == Some(HostStatus::Running) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(launcher.status(&p.id), Some(HostStatus::Running));
+        launcher.stop(&p.id);
+        assert_eq!(launcher.status(&p.id), None);
+        drop(ws);
+        launcher.start(&p, listener.local_addr().unwrap().port(), "second", "{}");
+        let mut second = connection(&listener).await;
+        message(&mut second).await;
+        launcher.stop_all();
+        assert_eq!(launcher.status(&p.id), None);
+        drop(second);
+        drop(launcher);
+        std::fs::remove_dir_all(p.dir).unwrap();
+    }
+    #[test]
+    fn launcher_adapter_maps_supervisor_status() {
+        use crate::plugins::{host::Launcher, link::PluginStatus as HostStatus};
+        let mut supervisor =
+            Supervisor::with_options(PathBuf::new(), NodeResolver::with_path(None), options());
+        let (control, _rx) = mpsc::channel();
+        let state = Arc::new(Mutex::new(PluginStatus::Starting));
+        supervisor.workers.insert(
+            "mapping".into(),
+            Worker {
+                control,
+                status: state.clone(),
+                thread: std::thread::spawn(|| {}),
+            },
+        );
+        for (input, expected) in [
+            (PluginStatus::Starting, Some(HostStatus::Starting)),
+            (PluginStatus::Running, Some(HostStatus::Running)),
+            (
+                PluginStatus::Crashed { restarts: 7 },
+                Some(HostStatus::Crashed { restarts: 7 }),
+            ),
+            (PluginStatus::MissingNode, Some(HostStatus::MissingNode)),
+            (PluginStatus::Disabled, None),
+        ] {
+            *state.lock().unwrap() = input;
+            assert_eq!(Launcher::status(&supervisor, "mapping"), expected);
+        }
+    }
+    #[test]
+    fn default_registration_deadline_allows_slow_node_startup() {
+        assert_eq!(
+            SupervisorOptions::default().registration_timeout,
+            Duration::from_secs(30)
+        );
     }
     #[tokio::test]
     async fn unregistered_plugin_times_out_and_restarts_with_backoff() {

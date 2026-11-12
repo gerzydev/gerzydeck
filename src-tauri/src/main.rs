@@ -8,7 +8,8 @@ use gerzys_deck::keyboard::SendInputKeyboard;
 use gerzys_deck::os;
 use gerzys_deck::render::render_key_jpeg;
 use gerzys_deck::plugin_commands::{self, HostTx, PluginNet};
-use gerzys_deck::plugins::host::{spawn_host, HostDeps, Launcher, LoadedPlugin};
+use gerzys_deck::plugins::host::{spawn_host, HostDeps};
+use gerzys_deck::plugins::process::Supervisor;
 use gerzys_deck::plugins::webview::{CompositeLauncher, HtmlLauncher};
 use gerzys_deck::store::{data_dir, Store};
 use std::sync::mpsc::channel;
@@ -114,16 +115,6 @@ fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
     gerzys_deck::render::tile_jpeg(&canvas)
 }
 
-/// Interim until the process supervisor lands: exe/node plugins are not started yet.
-struct PendingProcessLauncher;
-impl Launcher for PendingProcessLauncher {
-    fn start(&mut self, plugin: &LoadedPlugin, _port: u16, _uuid: &str, _info: &str) {
-        log::warn!("plugin {} needs the process supervisor (not wired yet)", plugin.id);
-    }
-    fn stop(&mut self, _id: &str) {}
-    fn stop_all(&mut self) {}
-}
-
 fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     let dir = data_dir();
     let store = Store::new(dir.clone());
@@ -139,7 +130,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
                 let _ = tx.send(Msg::Plugin(e));
             }
         }),
-        launcher: Box::new(CompositeLauncher { html: HtmlLauncher::new(app.clone()), procs: Box::new(PendingProcessLauncher) }),
+        launcher: Box::new(CompositeLauncher { html: HtmlLauncher::new(app.clone()), procs: Box::new(Supervisor::new(dir.join("logs/plugins"))) }),
         decode_image: gerzys_deck::plugins::image::decode_plugin_image,
         open_url: |url| os::launch_target(url, &[]),
         list_processes: os::list_process_names,
