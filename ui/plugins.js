@@ -35,7 +35,18 @@ function statusChip(ui, status) {
 }
 
 // ---------- page ----------
+let poll = null;
+
 export async function renderPluginsPage(ui, root) {
+  // keep statuses fresh while the page is visible (Startuje… → Běží)
+  clearInterval(poll);
+  poll = setInterval(async () => {
+    if (root.hidden || !root.isConnected) { clearInterval(poll); poll = null; return; }
+    const before = JSON.stringify(installed);
+    await loadInstalled(ui);
+    const typing = document.activeElement?.tagName === 'INPUT' && root.contains(document.activeElement);
+    if (JSON.stringify(installed) !== before && !typing) draw(ui, root);
+  }, 2000);
   if (!installed) await loadInstalled(ui);
   draw(ui, root);
   if (!catalog) {
