@@ -3,10 +3,13 @@
 use gerzys_deck::commands::{self, EngineTx};
 use gerzys_deck::config::Config;
 use gerzys_deck::device::{spawn_device, DeckOptions, HidApiBackend};
-use gerzys_deck::engine::{spawn_engine, EngineDeps, EventSink, Msg, State};
+use gerzys_deck::engine::{spawn_engine, EngineDeps, EventSink, Msg, PluginTile, State};
 use gerzys_deck::keyboard::SendInputKeyboard;
 use gerzys_deck::os;
 use gerzys_deck::render::render_key_jpeg;
+use gerzys_deck::plugin_commands::{self, HostTx, PluginNet};
+use gerzys_deck::plugins::host::{spawn_host, HostDeps, Launcher, LoadedPlugin};
+use gerzys_deck::plugins::webview::{CompositeLauncher, HtmlLauncher};
 use gerzys_deck::store::{data_dir, Store};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
@@ -91,9 +94,56 @@ fn init_logging(dir: &std::path::Path) {
     let _ = CombinedLogger::init(loggers);
 }
 
+/// Plugin-driven key: plugin image + title, plus ✓ / ⚠ feedback and a missing-plugin marker.
+fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
+    use gerzys_deck::engine::Overlay;
+    use gerzys_deck::plugins::image::{compose_tile, Align, TitleParams};
+    let title = if t.missing { Some(format!("⚠ {}", t.title.clone().unwrap_or_default())) } else { t.title.clone() };
+    let params = TitleParams { bold: true, ..TitleParams::default() };
+    let mut canvas = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &params);
+    let mark = match t.overlay {
+        Overlay::Ok => Some(("✓", [0x43, 0xc4, 0x6a])),
+        Overlay::Alert => Some(("⚠", [0xf2, 0xb8, 0x4b])),
+        Overlay::None => None,
+    };
+    if let Some((glyph, color)) = mark {
+        let dimmed = image::DynamicImage::ImageRgb8(canvas.clone()).brighten(-60).to_rgba8();
+        let big = TitleParams { show: true, size: 30, color, align: Align::Middle, bold: true };
+        canvas = compose_tile(Some(&dimmed), t.bg, Some(glyph), &big);
+    }
+    gerzys_deck::render::tile_jpeg(&canvas)
+}
+
+/// Interim until the process supervisor lands: exe/node plugins are not started yet.
+struct PendingProcessLauncher;
+impl Launcher for PendingProcessLauncher {
+    fn start(&mut self, plugin: &LoadedPlugin, _port: u16, _uuid: &str, _info: &str) {
+        log::warn!("plugin {} needs the process supervisor (not wired yet)", plugin.id);
+    }
+    fn stop(&mut self, _id: &str) {}
+    fn stop_all(&mut self) {}
+}
+
 fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     let dir = data_dir();
-    let store = Store::new(dir);
+    let store = Store::new(dir.clone());
+
+    // plugin host: its events go to the engine once the engine exists
+    let engine_slot: Arc<Mutex<Option<std::sync::mpsc::Sender<Msg>>>> = Arc::default();
+    let slot = engine_slot.clone();
+    let host_tx = spawn_host(HostDeps {
+        plugins_dir: gerzys_deck::plugins::plugins_dir(),
+        settings_file: dir.join("plugin-settings.json"),
+        events: Box::new(move |e| {
+            if let Some(tx) = slot.lock().unwrap().as_ref() {
+                let _ = tx.send(Msg::Plugin(e));
+            }
+        }),
+        launcher: Box::new(CompositeLauncher { html: HtmlLauncher::new(app.clone()), procs: Box::new(PendingProcessLauncher) }),
+        decode_image: gerzys_deck::plugins::image::decode_plugin_image,
+        open_url: |url| os::launch_target(url, &[]),
+        list_processes: os::list_process_names,
+    });
 
     let (dev_events_tx, dev_events_rx) = channel();
     let (device_tx, device_handle) = spawn_device(HidApiBackend::default(), DeckOptions::default(), dev_events_tx);
@@ -105,7 +155,10 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
         system: Arc::new(|c: &str| os::run_system(c)),
         sink: Box::new(TauriSink(app.clone())),
         render: render_key_jpeg,
+        render_plugin: render_plugin_tile,
+        host_tx: Some(host_tx.clone()),
     });
+    *engine_slot.lock().unwrap() = Some(engine_tx.clone());
 
     let tx = engine_tx.clone();
     std::thread::Builder::new().name("device-events".into()).spawn(move || {
@@ -136,6 +189,8 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     })?;
 
     app.manage(EngineTx(engine_tx));
+    app.manage(HostTx(Mutex::new(host_tx)));
+    app.manage(PluginNet::new());
     app.manage(Workers(Mutex::new(vec![engine_handle, device_handle])));
     Ok(())
 }
@@ -172,6 +227,15 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .register_uri_scheme_protocol(gerzys_deck::plugins::scheme::SCHEME, |_ctx, request| {
+            let served = gerzys_deck::plugins::scheme::serve(&gerzys_deck::plugins::plugins_dir(), request.uri().path());
+            tauri::http::Response::builder()
+                .status(served.status)
+                .header("Content-Type", served.mime)
+                .header("Cache-Control", "no-store")
+                .body(served.body)
+                .unwrap_or_default()
+        })
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -204,6 +268,14 @@ fn main() {
             commands::list_scancodes,
             commands::get_autostart,
             commands::set_autostart,
+            plugin_commands::plugins_list,
+            plugin_commands::plugins_catalog,
+            plugin_commands::plugins_install,
+            plugin_commands::plugins_install_file,
+            plugin_commands::plugins_uninstall,
+            plugin_commands::pi_open,
+            plugin_commands::pi_close,
+            plugin_commands::open_plugin_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

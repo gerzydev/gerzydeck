@@ -58,6 +58,8 @@ pub enum Action {
         #[serde(rename = "profileId")]
         profile_id: String,
     },
+    /// Action of a Stream Deck SDK plugin. `settings`/`state` are owned by the core (plugins write them).
+    Plugin { plugin: String, action: String, settings: Value, state: u8 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -185,6 +187,16 @@ pub fn normalize_action(v: &Value) -> Action {
                     return None;
                 }
                 Action::System { command }
+            }
+            "plugin" => {
+                let plugin = s(&v["plugin"], 200);
+                let action = s(&v["action"], 200);
+                if plugin.is_empty() || action.is_empty() {
+                    return None;
+                }
+                let settings = if v["settings"].is_object() { v["settings"].clone() } else { serde_json::json!({}) };
+                let state = v["state"].as_u64().filter(|&n| n < 16).unwrap_or(0) as u8;
+                Action::Plugin { plugin, action, settings, state }
             }
             "profile" => {
                 let profile_id = s(&v["profileId"], 64);
@@ -367,6 +379,21 @@ mod tests {
             { "type": "tap", "code": "KeyQ" }, { "type": "text", "text": "" }, { "type": "wait", "ms": 50 }
         ] }));
         assert_eq!(a, Action::Macro { steps: vec![Step::Tap { code: "KeyQ".into() }, Step::Wait { ms: 50 }] });
+    }
+
+    #[test]
+    fn plugin_actions_normalize() {
+        let ok = normalize_action(&json!({ "type": "plugin", "plugin": "com.elgato.obsstudio", "action": "com.elgato.obsstudio.record", "settings": { "a": 1 }, "state": 1 }));
+        assert_eq!(ok, Action::Plugin { plugin: "com.elgato.obsstudio".into(), action: "com.elgato.obsstudio.record".into(), settings: json!({ "a": 1 }), state: 1 });
+        let defaults = normalize_action(&json!({ "type": "plugin", "plugin": "p", "action": "a" }));
+        assert_eq!(defaults, Action::Plugin { plugin: "p".into(), action: "a".into(), settings: json!({}), state: 0 });
+        let bad_settings = normalize_action(&json!({ "type": "plugin", "plugin": "p", "action": "a", "settings": [1, 2], "state": 900 }));
+        assert_eq!(bad_settings, Action::Plugin { plugin: "p".into(), action: "a".into(), settings: json!({}), state: 0 });
+        assert_eq!(normalize_action(&json!({ "type": "plugin", "plugin": "", "action": "a" })), Action::None);
+        assert_eq!(normalize_action(&json!({ "type": "plugin", "plugin": "p" })), Action::None);
+        let v = serde_json::to_value(&ok).unwrap();
+        assert_eq!(v["type"], "plugin");
+        assert_eq!(v["settings"]["a"], 1);
     }
 
     #[test]

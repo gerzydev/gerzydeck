@@ -21,20 +21,31 @@ pub fn decode_plugin_image(src: &str, plugin_dir: Option<&Path>) -> Option<RgbaI
         return None;
     }
     if let Some(url) = src.strip_prefix("data:") {
+        // Plugins send loosely formed data URLs (no params, upper-case charset, image/jpg,
+        // wrapped base64, PNG labelled as JPEG). Accept them; the decoders below stay bounded.
         let (header, data) = url.split_once(',')?;
-        let (mime, encoding) = header.split_once(';')?;
-        if !matches!(mime, "image/png" | "image/jpeg" | "image/svg+xml") {
-            return None;
-        }
-        let bytes = match encoding {
-            "base64" => STANDARD.decode(data).ok()?,
-            "charset=utf8" | "charset=utf-8" if mime == "image/svg+xml" => percent_decode(data)?,
-            _ => return None,
-        };
-        return if mime == "image/svg+xml" {
-            svg(&bytes)
+        let mut parts = header.split(';').map(|p| p.trim().to_ascii_lowercase());
+        let mime = parts.next().unwrap_or_default();
+        let base64 = parts.any(|p| p == "base64");
+        let bytes = if base64 {
+            let clean: String = data.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+            STANDARD
+                .decode(&clean)
+                .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(clean.trim_end_matches('=')))
+                .ok()?
         } else {
-            raster(&bytes, Some(mime))
+            percent_decode(data).unwrap_or_else(|| data.as_bytes().to_vec())
+        };
+        let looks_svg = || {
+            let head = String::from_utf8_lossy(&bytes[..bytes.len().min(512)]).to_ascii_lowercase();
+            head.contains("<svg")
+        };
+        return match mime.as_str() {
+            "image/svg+xml" => svg(&bytes),
+            "image/png" | "image/jpeg" | "image/jpg" => raster(&bytes, None),
+            "" if looks_svg() => svg(&bytes),
+            "" => raster(&bytes, None),
+            _ => None,
         };
     }
     let path = super::manifest::resolve_image(plugin_dir?, src)?;
@@ -282,6 +293,26 @@ mod tests {
         img.write_to(&mut bytes, ImageFormat::Png).unwrap();
         bytes.into_inner()
     }
+    /// Real plugins send loosely formed data URLs; all of these must decode.
+    #[test]
+    fn lenient_data_urls_from_real_plugins() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="red"/></svg>"#;
+        let b64 = STANDARD.encode(png());
+        let wrapped: String = b64.as_bytes().chunks(8).map(|c| std::str::from_utf8(c).unwrap()).collect::<Vec<_>>().join("\n");
+        for src in [
+            format!("data:image/svg+xml,{svg}"),
+            format!("data:image/svg+xml;charset=UTF-8,{}", svg.replace('#', "%23")),
+            format!("data:image/svg+xml;utf8,{svg}"),
+            format!("data:image/jpg;base64,{b64}"),
+            format!("data:image/jpeg;base64,{b64}"), // PNG bytes labelled as JPEG
+            format!("data:image/png;base64,{wrapped}"),
+            format!("data:image/png;charset=utf-8;base64,{b64}"),
+            format!("data:;base64,{b64}"),
+        ] {
+            assert!(decode_plugin_image(&src, None).is_some(), "{}", &src[..src.len().min(60)]);
+        }
+    }
+
     #[test]
     fn png_data_url_decodes() {
         let src = format!("data:image/png;base64,{}", STANDARD.encode(png()));
@@ -300,12 +331,14 @@ mod tests {
             None
         )
         .is_some());
-        // MIME mismatch is invalid rather than silently decoded as another type.
+        // MIME mismatch (PNG labelled as JPEG) is tolerated: real plugins do this.
         assert!(decode_plugin_image(
             &format!("data:image/jpeg;base64,{}", STANDARD.encode(png())),
             None
         )
-        .is_none());
+        .is_some());
+        // non-image mime types are still refused
+        assert!(decode_plugin_image(&format!("data:text/html;base64,{}", STANDARD.encode(png())), None).is_none());
         let mut wide = Cursor::new(Vec::new());
         RgbaImage::new(4097, 1)
             .write_to(&mut wide, ImageFormat::Png)
