@@ -20,7 +20,6 @@ if (args.includes('--type')) {
   tap('Digit1'); console.log('Digit1 → na české klávesnici očekávej +');
   tap('Space');
   kb.typeText('ěščř'); console.log('text ěščř');
-  tap('F1'); console.log('F1 (v Poznámkovém bloku otevře nápovědu, můžeš zavřít)');
   process.exit(0);
 }
 
