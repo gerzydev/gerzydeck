@@ -6,7 +6,7 @@ use gerzys_deck::device::{spawn_device, DeckOptions, HidApiBackend};
 use gerzys_deck::engine::{spawn_engine, EngineDeps, EventSink, Msg, PluginTile, State};
 use gerzys_deck::keyboard::SendInputKeyboard;
 use gerzys_deck::os;
-use gerzys_deck::render::{render_key_jpeg, KeySpec};
+use gerzys_deck::render::render_key_jpeg;
 use gerzys_deck::plugin_commands::{self, HostTx, PluginNet};
 use gerzys_deck::plugins::host::{spawn_host, HostDeps, Launcher, LoadedPlugin};
 use gerzys_deck::plugins::webview::{CompositeLauncher, HtmlLauncher};
@@ -94,11 +94,24 @@ fn init_logging(dir: &std::path::Path) {
     let _ = CombinedLogger::init(loggers);
 }
 
-/// Interim plugin tile: title over the background (plugin images arrive with plugins::image).
+/// Plugin-driven key: plugin image + title, plus ✓ / ⚠ feedback and a missing-plugin marker.
 fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
-    let title = t.title.clone().unwrap_or_default();
-    let label = if t.missing { format!("⚠ {title}") } else { title };
-    render_key_jpeg(&KeySpec { image: None, label, bg: t.bg })
+    use gerzys_deck::engine::Overlay;
+    use gerzys_deck::plugins::image::{compose_tile, Align, TitleParams};
+    let title = if t.missing { Some(format!("⚠ {}", t.title.clone().unwrap_or_default())) } else { t.title.clone() };
+    let params = TitleParams { bold: true, ..TitleParams::default() };
+    let mut canvas = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &params);
+    let mark = match t.overlay {
+        Overlay::Ok => Some(("✓", [0x43, 0xc4, 0x6a])),
+        Overlay::Alert => Some(("⚠", [0xf2, 0xb8, 0x4b])),
+        Overlay::None => None,
+    };
+    if let Some((glyph, color)) = mark {
+        let dimmed = image::DynamicImage::ImageRgb8(canvas.clone()).brighten(-60).to_rgba8();
+        let big = TitleParams { show: true, size: 30, color, align: Align::Middle, bold: true };
+        canvas = compose_tile(Some(&dimmed), t.bg, Some(glyph), &big);
+    }
+    gerzys_deck::render::tile_jpeg(&canvas)
 }
 
 /// Interim until the process supervisor lands: exe/node plugins are not started yet.
@@ -109,18 +122,6 @@ impl Launcher for PendingProcessLauncher {
     }
     fn stop(&mut self, _id: &str) {}
     fn stop_all(&mut self) {}
-}
-
-/// Interim image decoder until plugins::image lands: PNG/JPEG data URLs and plugin files.
-fn decode_plugin_image(src: &str, dir: Option<&std::path::Path>) -> Option<image::RgbaImage> {
-    use base64::Engine as _;
-    if let Some(rest) = src.strip_prefix("data:") {
-        let (_, b64) = rest.split_once(";base64,")?;
-        let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
-        return image::load_from_memory(&bytes).ok().map(|i| i.to_rgba8());
-    }
-    let path = gerzys_deck::plugins::manifest::resolve_image(dir?, src)?;
-    image::open(path).ok().map(|i| i.to_rgba8())
 }
 
 fn start_core(app: &AppHandle) -> anyhow::Result<()> {
@@ -139,7 +140,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
             }
         }),
         launcher: Box::new(CompositeLauncher { html: HtmlLauncher::new(app.clone()), procs: Box::new(PendingProcessLauncher) }),
-        decode_image: decode_plugin_image,
+        decode_image: gerzys_deck::plugins::image::decode_plugin_image,
         open_url: |url| os::launch_target(url, &[]),
         list_processes: os::list_process_names,
     });
