@@ -313,3 +313,25 @@ fn swapping_keys_moves_everything_including_plugin_settings() {
     p.tx.send(Msg::SwapKeys { profile_id: "A".into(), a: 3, b: 99, reply: r }).unwrap();
     assert!(rx.recv_timeout(Duration::from_secs(2)).unwrap().is_err());
 }
+
+#[test]
+fn custom_image_on_a_plugin_key_keeps_the_live_title() {
+    let p = P::new();
+    let mut png = Vec::new();
+    image::RgbaImage::from_pixel(4, 4, image::Rgba([0, 255, 0, 255])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let id = p.store.save_image(&png).unwrap();
+    p.connect();
+    p.images();
+    let (r, rx) = channel();
+    p.tx.send(Msg::GetConfig(r)).unwrap();
+    let mut c = rx.recv().unwrap();
+    c.profiles[0].keys.get_mut("3").unwrap().image = Some(id);
+    let (r, rx) = channel();
+    p.tx.send(Msg::SetConfig(serde_json::to_value(&c).unwrap(), r)).unwrap();
+    rx.recv().unwrap().unwrap();
+    std::thread::sleep(Duration::from_millis(120));
+    p.plugin(PluginEvent::SetTitle { context: "A:3".into(), title: Some("8%".into()), state: None });
+    std::thread::sleep(Duration::from_millis(150));
+    let last = p.images().into_iter().filter(|(k, _)| *k == 3).last().map(|(_, s)| s);
+    assert_eq!(last.as_deref(), Some(r#"P|None|Some("8%")|None|true|false"#));
+}

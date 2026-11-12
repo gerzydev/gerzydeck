@@ -160,6 +160,8 @@ struct Engine {
     missing_plugins: HashSet<String>,
     last_frame: HashMap<u8, Instant>,
     frame_pending: bool,
+    /// decoded user images drawn under plugin titles (image id → pixels)
+    user_images: HashMap<String, Arc<RgbaImage>>,
 }
 
 impl Engine {
@@ -193,6 +195,7 @@ impl Engine {
             missing_plugins: HashSet::new(),
             last_frame: HashMap::new(),
             frame_pending: false,
+            user_images: HashMap::new(),
         };
         e.refresh_name();
         e
@@ -319,7 +322,7 @@ impl Engine {
         for k in 1..=15u8 {
             let cfg = profile.key(k);
             let plugin = match &cfg.action {
-                Action::Plugin { plugin, state, .. } if cfg.image.is_none() => Some((plugin.clone(), *state)),
+                Action::Plugin { plugin, state, .. } => Some((plugin.clone(), *state)),
                 _ => None,
             };
             let context = context_for(&profile.id, k);
@@ -332,8 +335,9 @@ impl Engine {
                 .unwrap_or_default();
             let sig = match &plugin {
                 Some((p, state)) => format!(
-                    "P|{}|{}|{}|{}|{:?}|{}|{:?}",
+                    "P|{}|{:?}|{}|{}|{}|{:?}|{}|{:?}",
                     self.views.get(&context).map_or(0, |v| v.gen),
+                    cfg.image,
                     state,
                     cfg.label,
                     cfg.bg,
@@ -352,13 +356,15 @@ impl Engine {
                         self.frame_pending = true;
                         continue;
                     }
+                    let own = cfg.image.as_deref().and_then(|id| self.user_image(id));
                     let view = self.views.get(&context);
                     let style = view.and_then(|v| v.styles.get(*state as usize).or_else(|| v.styles.first())).cloned().unwrap_or_default();
                     let tile = PluginTile {
                         align: cfg.title_align.clone().or(style.align),
                         size: style.size,
                         show_title: style.show.unwrap_or(true),
-                        image: view.and_then(|v| PluginView::pick(&v.images, *state)),
+                        // the user's own image replaces the plugin image, the live title stays
+                        image: own.or_else(|| view.and_then(|v| PluginView::pick(&v.images, *state))),
                         title: view.and_then(|v| PluginView::pick(&v.titles, *state)),
                         label: (!cfg.label.is_empty()).then(|| cfg.label.clone()),
                         bg: parse_hex(&cfg.bg),
@@ -587,6 +593,17 @@ impl Engine {
         }
         self.store.save(&self.config).map_err(|e| format!("Uložení selhalo: {e}"))?;
         Ok(self.config.clone())
+    }
+
+    fn user_image(&mut self, id: &str) -> Option<Arc<RgbaImage>> {
+        if !self.user_images.contains_key(id) {
+            let img = image::load_from_memory(&self.store.read_image(id)?).ok()?.to_rgba8();
+            if self.user_images.len() > 64 {
+                self.user_images.clear();
+            }
+            self.user_images.insert(id.to_string(), Arc::new(img));
+        }
+        self.user_images.get(id).cloned()
     }
 
     /// Notifications and rendering after a config change. Runs after the caller got its reply,
