@@ -1,7 +1,12 @@
 //! Engine actor: owns config + active profile, renders the deck, routes presses to actions.
 
 pub use crate::config::Config;
-use crate::config::{decide_profile, normalize_config};
+use crate::config::{decide_profile, normalize_config, Action};
+use crate::plugins::link::{context_for, parse_context, HostCmd, KeyCtx, PluginEvent, PluginStatus};
+use crate::plugins::protocol::ActionCtx;
+use image::RgbaImage;
+use std::collections::HashSet;
+use std::time::{Duration, Instant};
 use crate::device::{DeviceCmd, DeviceEvent};
 use crate::keyboard::Keyboard;
 pub use crate::os::Foreground;
@@ -34,8 +39,64 @@ pub struct State {
     pub calibrating: bool,
 }
 
+/// Device id reported to plugins.
+pub const DEVICE_ID: &str = "D6-main";
+/// Minimum gap between two plugin-driven frames of one key (≤ 10 fps).
+const PLUGIN_FRAME_GAP: Duration = Duration::from_millis(100);
+const OVERLAY_TIME: Duration = Duration::from_millis(1500);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Overlay {
+    #[default]
+    None,
+    Ok,
+    Alert,
+}
+
+/// Everything needed to draw a key driven by a plugin.
+#[derive(Debug, Clone, Default)]
+pub struct PluginTile {
+    pub image: Option<Arc<RgbaImage>>,
+    pub title: Option<String>,
+    pub bg: [u8; 3],
+    pub overlay: Overlay,
+    /// plugin not installed: draw the label with a warning marker
+    pub missing: bool,
+}
+
+/// Latest images/titles a plugin set for one action instance (None key = all states).
+#[derive(Default)]
+struct PluginView {
+    images: HashMap<Option<u8>, Arc<RgbaImage>>,
+    titles: HashMap<Option<u8>, String>,
+    overlay: Option<(Overlay, Instant)>,
+    gen: u64,
+}
+
+impl PluginView {
+    fn pick<T: Clone>(map: &HashMap<Option<u8>, T>, state: u8) -> Option<T> {
+        map.get(&Some(state)).or_else(|| map.get(&None)).cloned()
+    }
+    fn set<T>(map: &mut HashMap<Option<u8>, T>, state: Option<u8>, value: Option<T>) {
+        if state.is_none() {
+            map.clear();
+        }
+        match value {
+            Some(v) => {
+                map.insert(state, v);
+            }
+            None => {
+                map.remove(&state);
+            }
+        }
+    }
+}
+
 pub enum Msg {
     Device(DeviceEvent),
+    Plugin(PluginEvent),
+    /// periodic wake-up for throttled frames and overlay expiry
+    Tick,
     Foreground(Foreground),
     Conflicts(Vec<String>),
     GetConfig(Sender<Config>),
@@ -56,6 +117,8 @@ pub struct EngineDeps {
     pub system: CommandFn,
     pub sink: Box<dyn EventSink>,
     pub render: fn(&KeySpec) -> Vec<u8>,
+    pub render_plugin: fn(&PluginTile) -> Vec<u8>,
+    pub host_tx: Option<Sender<HostCmd>>,
 }
 
 fn key_map_array(m: &Option<Vec<u8>>) -> Option<[u8; 15]> {
@@ -74,6 +137,16 @@ struct Engine {
     device_tx: Sender<DeviceCmd>,
     sink: Box<dyn EventSink>,
     render: fn(&KeySpec) -> Vec<u8>,
+    render_plugin: fn(&PluginTile) -> Vec<u8>,
+    host_tx: Option<Sender<HostCmd>>,
+    /// action instances the host was told are visible (context → instance)
+    visible: HashMap<String, KeyCtx>,
+    /// user titles already sent as titleParametersDidChange
+    sent_titles: HashMap<String, String>,
+    views: HashMap<String, PluginView>,
+    missing_plugins: HashSet<String>,
+    last_frame: HashMap<u8, Instant>,
+    frame_pending: bool,
 }
 
 impl Engine {
@@ -99,6 +172,14 @@ impl Engine {
             device_tx: d.device_tx,
             sink: d.sink,
             render: d.render,
+            render_plugin: d.render_plugin,
+            host_tx: d.host_tx,
+            visible: HashMap::new(),
+            sent_titles: HashMap::new(),
+            views: HashMap::new(),
+            missing_plugins: HashSet::new(),
+            last_frame: HashMap::new(),
+            frame_pending: false,
         };
         e.refresh_name();
         e
@@ -125,6 +206,7 @@ impl Engine {
         log::info!("profile -> {id}");
         self.previous_profile = Some(std::mem::replace(&mut self.state.active_profile_id, id));
         self.emit_state();
+        self.sync_visible();
         self.render_active();
     }
 
@@ -152,24 +234,131 @@ impl Engine {
         }
     }
 
+    fn host(&self, cmd: HostCmd) {
+        if let Some(tx) = &self.host_tx {
+            let _ = tx.send(cmd);
+        }
+    }
+
+    fn key_ctx(profile_id: &str, key: u8, action: &Action) -> Option<KeyCtx> {
+        let Action::Plugin { plugin, action, settings, state } = action else { return None };
+        Some(KeyCtx {
+            plugin: plugin.clone(),
+            ctx: ActionCtx {
+                action: action.clone(),
+                context: context_for(profile_id, key),
+                device: DEVICE_ID.into(),
+                key,
+                settings: settings.clone(),
+                state: *state,
+            },
+        })
+    }
+
+    /// Tells the host which plugin actions are on the deck now (willAppear / willDisappear diff)
+    /// and forwards changed user titles.
+    fn sync_visible(&mut self) {
+        let mut desired: HashMap<String, (KeyCtx, String)> = HashMap::new();
+        if self.state.connected {
+            let profile = self.active();
+            for k in 1..=15u8 {
+                let cfg = profile.key(k);
+                if let Some(kc) = Self::key_ctx(&profile.id, k, &cfg.action) {
+                    desired.insert(kc.ctx.context.clone(), (kc, cfg.label.clone()));
+                }
+            }
+        }
+        let gone: Vec<String> = self
+            .visible
+            .iter()
+            .filter(|(c, old)| desired.get(*c).is_none_or(|(new, _)| new.plugin != old.plugin || new.ctx.action != old.ctx.action))
+            .map(|(c, _)| c.clone())
+            .collect();
+        for c in gone {
+            if let Some(old) = self.visible.remove(&c) {
+                self.sent_titles.remove(&c);
+                self.host(HostCmd::WillDisappear(old));
+            }
+        }
+        let mut contexts: Vec<String> = desired.keys().cloned().collect();
+        contexts.sort();
+        for c in contexts {
+            let (kc, label) = desired[&c].clone();
+            if !self.visible.contains_key(&c) {
+                self.host(HostCmd::WillAppear(kc.clone()));
+            }
+            self.visible.insert(c.clone(), kc.clone());
+            if self.sent_titles.get(&c).map_or(!label.is_empty(), |t| *t != label) {
+                self.sent_titles.insert(c.clone(), label.clone());
+                self.host(HostCmd::TitleParams { key: kc, title: label });
+            }
+        }
+    }
+
     fn render_active(&mut self) {
         if !self.state.connected {
             return;
         }
         let profile = self.active().clone();
+        let now = Instant::now();
         let mut images = Vec::new();
+        self.frame_pending = false;
         for k in 1..=15u8 {
             let cfg = profile.key(k);
-            let sig = format!("{:?}|{}|{}", cfg.image, cfg.label, cfg.bg);
+            let plugin = match &cfg.action {
+                Action::Plugin { plugin, state, .. } if cfg.image.is_none() => Some((plugin.clone(), *state)),
+                _ => None,
+            };
+            let context = context_for(&profile.id, k);
+            let overlay = self
+                .views
+                .get(&context)
+                .and_then(|v| v.overlay)
+                .filter(|(_, until)| *until > now)
+                .map(|(o, _)| o)
+                .unwrap_or_default();
+            let sig = match &plugin {
+                Some((p, state)) => format!(
+                    "P|{}|{}|{}|{}|{:?}|{}",
+                    self.views.get(&context).map_or(0, |v| v.gen),
+                    state,
+                    cfg.label,
+                    cfg.bg,
+                    overlay,
+                    self.missing_plugins.contains(p)
+                ),
+                None => format!("{:?}|{}|{}", cfg.image, cfg.label, cfg.bg),
+            };
             if self.rendered.get(&k) == Some(&sig) {
                 continue;
             }
-            let spec = KeySpec {
-                image: cfg.image.as_deref().and_then(|id| self.store.read_image(id)),
-                label: cfg.label.clone(),
-                bg: parse_hex(&cfg.bg),
+            let jpeg = match &plugin {
+                Some((p, state)) => {
+                    if self.last_frame.get(&k).is_some_and(|t| now.duration_since(*t) < PLUGIN_FRAME_GAP) {
+                        self.frame_pending = true;
+                        continue;
+                    }
+                    let view = self.views.get(&context);
+                    let tile = PluginTile {
+                        image: view.and_then(|v| PluginView::pick(&v.images, *state)),
+                        title: if cfg.label.is_empty() { view.and_then(|v| PluginView::pick(&v.titles, *state)) } else { Some(cfg.label.clone()) },
+                        bg: parse_hex(&cfg.bg),
+                        overlay,
+                        missing: self.missing_plugins.contains(p),
+                    };
+                    self.last_frame.insert(k, now);
+                    (self.render_plugin)(&tile)
+                }
+                None => {
+                    let spec = KeySpec {
+                        image: cfg.image.as_deref().and_then(|id| self.store.read_image(id)),
+                        label: cfg.label.clone(),
+                        bg: parse_hex(&cfg.bg),
+                    };
+                    (self.render)(&spec)
+                }
             };
-            images.push((k, (self.render)(&spec)));
+            images.push((k, jpeg));
             self.rendered.insert(k, sig);
         }
         if !images.is_empty() {
@@ -177,9 +366,128 @@ impl Engine {
         }
     }
 
+    /// Mutable plugin action at a context, if the context names a plugin key in the config.
+    fn plugin_action_mut(&mut self, context: &str) -> Option<(&mut serde_json::Value, &mut u8)> {
+        let (profile_id, key) = parse_context(context)?;
+        let profile = self.config.profiles.iter_mut().find(|p| p.id == profile_id)?;
+        match &mut profile.keys.get_mut(&key.to_string())?.action {
+            Action::Plugin { settings, state, .. } => Some((settings, state)),
+            _ => None,
+        }
+    }
+
+    fn is_plugin_context(&self, context: &str) -> bool {
+        parse_context(context).is_some_and(|(p, k)| {
+            self.config.profiles.iter().any(|pr| pr.id == p && matches!(pr.key(k).action, Action::Plugin { .. }))
+        })
+    }
+
+    fn touch_view(&mut self, context: &str) -> Option<&mut PluginView> {
+        if !self.is_plugin_context(context) {
+            return None;
+        }
+        let v = self.views.entry(context.to_string()).or_default();
+        v.gen += 1;
+        Some(v)
+    }
+
+    fn save_config(&mut self) {
+        if let Err(e) = self.store.save(&self.config) {
+            log::error!("saving config failed: {e}");
+        }
+        self.sink.config(&self.config);
+    }
+
+    fn on_plugin(&mut self, ev: PluginEvent) {
+        match ev {
+            PluginEvent::SetImage { context, image, state } => {
+                if let Some(v) = self.touch_view(&context) {
+                    PluginView::set(&mut v.images, state, image);
+                    self.render_active();
+                }
+            }
+            PluginEvent::SetTitle { context, title, state } => {
+                if let Some(v) = self.touch_view(&context) {
+                    PluginView::set(&mut v.titles, state, title);
+                    self.render_active();
+                }
+            }
+            PluginEvent::SetState { context, state } => {
+                let state = state.min(15);
+                if let Some((_, st)) = self.plugin_action_mut(&context) {
+                    *st = state;
+                    if let Some(kc) = self.visible.get_mut(&context) {
+                        kc.ctx.state = state;
+                    }
+                    self.touch_view(&context);
+                    self.save_config();
+                    self.render_active();
+                }
+            }
+            PluginEvent::SetSettings { context, settings } => {
+                let settings = if settings.is_object() { settings } else { serde_json::json!({}) };
+                if let Some((s, _)) = self.plugin_action_mut(&context) {
+                    *s = settings.clone();
+                    if let Some(kc) = self.visible.get_mut(&context) {
+                        kc.ctx.settings = settings;
+                    }
+                    self.save_config();
+                }
+            }
+            PluginEvent::ShowOk { context } => self.overlay(&context, Overlay::Ok),
+            PluginEvent::ShowAlert { context } => self.overlay(&context, Overlay::Alert),
+            PluginEvent::SwitchProfile { profile } => {
+                let id = self.config.profiles.iter().find(|p| p.name == profile || p.id == profile).map(|p| p.id.clone());
+                if let Some(id) = id {
+                    self.set_active(id);
+                }
+            }
+            PluginEvent::Status { plugin, status } => {
+                let changed = if status == PluginStatus::NotInstalled {
+                    self.missing_plugins.insert(plugin)
+                } else {
+                    self.missing_plugins.remove(&plugin)
+                };
+                if changed {
+                    self.render_active();
+                }
+            }
+        }
+    }
+
+    fn overlay(&mut self, context: &str, o: Overlay) {
+        if let Some(v) = self.touch_view(context) {
+            v.overlay = Some((o, Instant::now() + OVERLAY_TIME));
+            if let Some((_, k)) = parse_context(context) {
+                self.last_frame.remove(&k); // feedback shows right away
+            }
+            self.render_active();
+        }
+    }
+
+    fn on_tick(&mut self) {
+        let now = Instant::now();
+        let mut expired = false;
+        for v in self.views.values_mut() {
+            if v.overlay.is_some_and(|(_, until)| until <= now) {
+                v.overlay = None;
+                v.gen += 1;
+                expired = true;
+            }
+        }
+        if expired || self.frame_pending {
+            self.render_active();
+        }
+    }
+
     fn on_key(&mut self, key: u8, pressed: bool) {
         self.sink.key(key, pressed);
         if self.state.calibrating {
+            return;
+        }
+        let context = context_for(&self.active().id, key);
+        if let Some(kc) = self.visible.get(&context).cloned() {
+            self.host(if pressed { HostCmd::KeyDown(kc) } else { HostCmd::KeyUp(kc) });
             return;
         }
         if pressed {
@@ -195,7 +503,22 @@ impl Engine {
     }
 
     fn set_config(&mut self, raw: &serde_json::Value) -> Result<Config, String> {
-        let cfg = normalize_config(raw);
+        let mut cfg = normalize_config(raw);
+        // plugin settings/state are owned by the core: keep what plugins wrote, whatever the editor sent
+        for profile in &mut cfg.profiles {
+            let Some(old) = self.config.profiles.iter().find(|p| p.id == profile.id) else { continue };
+            for (k, kc) in profile.keys.iter_mut() {
+                let Some(old_key) = old.keys.get(k) else { continue };
+                if let (Action::Plugin { plugin, action, settings, state }, Action::Plugin { plugin: op, action: oa, settings: os, state: ost }) =
+                    (&mut kc.action, &old_key.action)
+                {
+                    if plugin == op && action == oa {
+                        *settings = os.clone();
+                        *state = *ost;
+                    }
+                }
+            }
+        }
         self.store.save(&cfg).map_err(|e| format!("Uložení selhalo: {e}"))?;
         self.store.prune_images(&cfg);
         if cfg.brightness != self.config.brightness {
@@ -220,6 +543,7 @@ impl Engine {
         self.sink.config(&self.config);
         if self.exists(&self.state.active_profile_id) {
             self.emit_state();
+            self.sync_visible();
             self.render_active();
         } else {
             let target = decide_profile(&self.config, self.state.foreground_exe.as_deref(), &self.state.manual_profile_id);
@@ -234,7 +558,10 @@ impl Engine {
                 log::info!("deck connected");
                 self.state.connected = true;
                 self.rendered.clear();
+                self.last_frame.clear();
                 self.emit_state();
+                self.host(HostCmd::DeviceConnected);
+                self.sync_visible();
                 self.render_active();
             }
             Msg::Device(DeviceEvent::Disconnected) => {
@@ -242,9 +569,13 @@ impl Engine {
                 self.runner.release_all();
                 self.state.connected = false;
                 self.emit_state();
+                self.sync_visible();
+                self.host(HostCmd::DeviceDisconnected);
             }
             Msg::Device(DeviceEvent::Raw { device_id, pressed }) => self.sink.raw(device_id, pressed),
             Msg::Device(DeviceEvent::Key { key, pressed }) => self.on_key(key, pressed),
+            Msg::Plugin(ev) => self.on_plugin(ev),
+            Msg::Tick => self.on_tick(),
             Msg::Foreground(fg) => {
                 self.state.foreground_exe = fg.exe;
                 self.state.foreground_elevated = fg.elevated;
@@ -293,6 +624,7 @@ impl Engine {
             }
             Msg::Shutdown => {
                 self.runner.release_all();
+                self.host(HostCmd::Shutdown);
                 let _ = self.device_tx.send(DeviceCmd::Stop);
                 return false;
             }
@@ -303,6 +635,16 @@ impl Engine {
 
 pub fn spawn_engine(deps: EngineDeps) -> (Sender<Msg>, JoinHandle<()>) {
     let (tx, rx) = channel::<Msg>();
+    let ticker = tx.clone();
+    std::thread::Builder::new()
+        .name("engine-tick".into())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(50));
+            if ticker.send(Msg::Tick).is_err() {
+                break;
+            }
+        })
+        .expect("spawn engine ticker");
     let handle = std::thread::Builder::new()
         .name("engine".into())
         .spawn(move || {
@@ -356,6 +698,10 @@ mod tests {
         format!("{}|{:?}|{}", spec.label, spec.bg, spec.image.is_some()).into_bytes()
     }
 
+    fn render_plugin(tile: &PluginTile) -> Vec<u8> {
+        format!("P|{:?}|{:?}|{}|{}", tile.title, tile.overlay, tile.image.is_some(), tile.missing).into_bytes()
+    }
+
     fn seed() -> Config {
         normalize_config(&json!({
             "defaultProfileId": "A", "activeProfileId": "A",
@@ -376,6 +722,7 @@ mod tests {
     struct T {
         tx: Sender<Msg>,
         dev: Receiver<DeviceCmd>,
+        _host: Receiver<HostCmd>,
         kb: Rec,
         sink: Rec,
         store: Store,
@@ -383,9 +730,13 @@ mod tests {
 
     impl T {
         fn new() -> T {
+            T::with(seed())
+        }
+        fn with(cfg: Config) -> T {
             let dir = std::env::temp_dir().join(format!("deck-engine-{}", new_id()));
             let store = Store::new(dir);
-            store.save(&seed()).unwrap();
+            store.save(&cfg).unwrap();
+            let (htx, hrx) = channel();
             let (dtx, drx) = channel();
             let kb = Rec::default();
             let sink = Rec::default();
@@ -397,8 +748,10 @@ mod tests {
                 system: Arc::new(|_: &str| {}),
                 sink: Box::new(FakeSink(sink.clone())),
                 render,
+                render_plugin,
+                host_tx: Some(htx),
             });
-            let t = T { tx, dev: drx, kb, sink, store };
+            let t = T { tx, dev: drx, _host: hrx, kb, sink, store };
             t.state(); // wait for startup
             while t.dev.try_recv().is_ok() {} // drop startup SetKeyMap/SetBrightness
             t
@@ -565,6 +918,8 @@ mod tests {
             system: Arc::new(|_: &str| {}),
             sink: Box::new(BlockingSink(gate.clone())),
             render,
+            render_plugin,
+            host_tx: None,
         });
         let (r, rx) = channel();
         tx.send(Msg::SetConfig(serde_json::to_value(seed()).unwrap(), r)).unwrap();

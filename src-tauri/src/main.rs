@@ -3,10 +3,10 @@
 use gerzys_deck::commands::{self, EngineTx};
 use gerzys_deck::config::Config;
 use gerzys_deck::device::{spawn_device, DeckOptions, HidApiBackend};
-use gerzys_deck::engine::{spawn_engine, EngineDeps, EventSink, Msg, State};
+use gerzys_deck::engine::{spawn_engine, EngineDeps, EventSink, Msg, PluginTile, State};
 use gerzys_deck::keyboard::SendInputKeyboard;
 use gerzys_deck::os;
-use gerzys_deck::render::render_key_jpeg;
+use gerzys_deck::render::{render_key_jpeg, KeySpec};
 use gerzys_deck::store::{data_dir, Store};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
@@ -91,6 +91,13 @@ fn init_logging(dir: &std::path::Path) {
     let _ = CombinedLogger::init(loggers);
 }
 
+/// Interim plugin tile: title over the background (plugin images arrive with plugins::image).
+fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
+    let title = t.title.clone().unwrap_or_default();
+    let label = if t.missing { format!("⚠ {title}") } else { title };
+    render_key_jpeg(&KeySpec { image: None, label, bg: t.bg })
+}
+
 fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     let dir = data_dir();
     let store = Store::new(dir);
@@ -105,6 +112,8 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
         system: Arc::new(|c: &str| os::run_system(c)),
         sink: Box::new(TauriSink(app.clone())),
         render: render_key_jpeg,
+        render_plugin: render_plugin_tile,
+        host_tx: None,
     });
 
     let tx = engine_tx.clone();

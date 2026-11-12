@@ -10,3 +10,5 @@ pub mod os;
 pub mod engine;
 pub mod commands;
 pub mod plugins;
+#[cfg(test)]
+mod engine_plugin_tests;
