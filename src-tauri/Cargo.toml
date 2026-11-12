@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hidapi = "2.6"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "ico"] }
-imageproc = { version = "0.27", default-features = false }
+imageproc = { version = "0.27", default-features = false, features = ["text"] }
 ab_glyph = "0.2"
 sha2 = "0.11"
 anyhow = "1"
