@@ -1,7 +1,7 @@
 //! Plugin host actor: loads installed plugins, launches them, owns the WebSocket server and
 //! routes SDK messages between the engine, plugins and property inspectors.
 
-use super::link::{HostCmd, KeyCtx, PiInfo, PluginEvent, PluginStatus};
+use super::link::{ActionSummary, HostCmd, KeyCtx, PiInfo, PluginEvent, PluginStatus, PluginSummary};
 use super::manifest::Manifest;
 use super::protocol::{self, coordinates, info_json, Inbound};
 use super::scheme;
@@ -36,6 +36,7 @@ impl LoadedPlugin {
 /// Starts plugin programs (exe/node via the process supervisor, html via hidden webviews).
 pub trait Launcher: Send {
     fn start(&mut self, plugin: &LoadedPlugin, port: u16, uuid: &str, info: &str);
+    fn stop(&mut self, id: &str);
     fn stop_all(&mut self);
 }
 
@@ -103,6 +104,7 @@ struct PluginRt {
     tx: Option<UnboundedSender<String>>,
     queue: Vec<String>,
     ever_connected: bool,
+    status: PluginStatus,
 }
 
 struct PiRt {
@@ -140,6 +142,78 @@ impl Host {
         (self.deps.events)(e);
     }
 
+    fn set_status(&mut self, id: &str, status: PluginStatus) {
+        if let Some(p) = self.plugins.get_mut(id) {
+            p.status = status.clone();
+        }
+        self.emit(PluginEvent::Status { plugin: id.to_string(), status });
+    }
+
+    /// Loads one plugin folder, launches it and queues the state it must know about.
+    fn start_plugin(&mut self, loaded: LoadedPlugin) {
+        let id = loaded.id.clone();
+        if !loaded.supports_windows() {
+            log::warn!("plugin {id} does not support Windows");
+            self.emit(PluginEvent::Status { plugin: id, status: PluginStatus::Unsupported });
+            return;
+        }
+        let uuid = new_token();
+        self.tokens.insert(uuid.clone(), Registrant::Plugin(id.clone()));
+        let plugin_uuid = loaded.manifest.uuid.clone().unwrap_or_else(|| id.trim_end_matches(".sdPlugin").to_string());
+        let info = info_json(DEVICE_ID, &plugin_uuid, loaded.manifest.version.as_deref().unwrap_or("1.0")).to_string();
+        self.deps.launcher.start(&loaded, self.port, &uuid, &info);
+        let mut queue = vec![];
+        if self.device_connected {
+            queue.push(protocol::device_did_connect(DEVICE_ID).to_string());
+        }
+        let mine: Vec<KeyCtx> = self.instances.values().filter(|k| k.plugin == id).cloned().collect();
+        queue.extend(mine.iter().map(|k| protocol::appear_event("willAppear", &k.ctx).to_string()));
+        self.plugins.insert(id.clone(), PluginRt { loaded, tx: None, queue, ever_connected: false, status: PluginStatus::Starting });
+        for k in mine {
+            if let Some(img) = self.default_image(&k) {
+                self.emit(PluginEvent::SetImage { context: k.ctx.context.clone(), image: Some(Arc::new(img)), state: None });
+            }
+        }
+        self.set_status(&id, PluginStatus::Starting);
+    }
+
+    fn stop_plugin(&mut self, id: &str) {
+        if self.plugins.remove(id).is_some() {
+            self.deps.launcher.stop(id);
+        }
+    }
+
+    fn summaries(&self) -> Vec<PluginSummary> {
+        let mut out: Vec<PluginSummary> = self
+            .plugins
+            .values()
+            .map(|p| {
+                let m = &p.loaded.manifest;
+                let icon_url = |base: &str| {
+                    super::manifest::resolve_image(&p.loaded.dir, base)
+                        .and_then(|abs| p.loaded.dir.canonicalize().ok().and_then(|root| abs.strip_prefix(root).ok().map(|r| r.to_string_lossy().into_owned())))
+                        .map(|rel| scheme::asset_url(&p.loaded.id, &rel))
+                        .unwrap_or_default()
+                };
+                PluginSummary {
+                    id: p.loaded.id.clone(),
+                    dir: p.loaded.dir.to_string_lossy().into_owned(),
+                    name: m.name.clone().unwrap_or_else(|| p.loaded.id.clone()),
+                    version: m.version.clone().unwrap_or_default(),
+                    author: m.author.clone().unwrap_or_default(),
+                    icon: icon_url(&m.icon),
+                    status: p.status.clone(),
+                    actions: m
+                        .keypad_actions()
+                        .map(|a| ActionSummary { uuid: a.uuid.clone(), name: a.name.clone(), icon: icon_url(&a.icon), tooltip: a.tooltip.clone() })
+                        .collect(),
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out
+    }
+
     fn to_plugin(&mut self, plugin: &str, v: Value) {
         if let Some(p) = self.plugins.get_mut(plugin) {
             send_or_queue(&p.tx, &mut p.queue, v.to_string());
@@ -154,18 +228,7 @@ impl Host {
 
     fn launch_all(&mut self) {
         for loaded in load_installed(&self.deps.plugins_dir) {
-            if !loaded.supports_windows() {
-                log::warn!("plugin {} does not support Windows", loaded.id);
-                self.emit(PluginEvent::Status { plugin: loaded.id.clone(), status: PluginStatus::Unsupported });
-                continue;
-            }
-            let uuid = new_token();
-            self.tokens.insert(uuid.clone(), Registrant::Plugin(loaded.id.clone()));
-            let plugin_uuid = loaded.manifest.uuid.clone().unwrap_or_else(|| loaded.id.trim_end_matches(".sdPlugin").to_string());
-            let info = info_json(DEVICE_ID, &plugin_uuid, loaded.manifest.version.as_deref().unwrap_or("1.0")).to_string();
-            self.deps.launcher.start(&loaded, self.port, &uuid, &info);
-            self.emit(PluginEvent::Status { plugin: loaded.id.clone(), status: PluginStatus::Starting });
-            self.plugins.insert(loaded.id.clone(), PluginRt { loaded, tx: None, queue: vec![], ever_connected: false });
+            self.start_plugin(loaded);
         }
     }
 
@@ -205,7 +268,9 @@ impl Host {
             }
             HostCmd::WillAppear(kc) => {
                 if !self.plugins.contains_key(&kc.plugin) {
+                    // remember it: installing the plugin later replays willAppear
                     self.emit(PluginEvent::Status { plugin: kc.plugin.clone(), status: PluginStatus::NotInstalled });
+                    self.instances.insert(kc.ctx.context.clone(), kc);
                     return true;
                 }
                 if let Some(img) = self.default_image(&kc) {
@@ -229,6 +294,24 @@ impl Host {
                 let _ = reply.send(info);
             }
             HostCmd::PiClose { context } => self.close_pi(&context),
+            HostCmd::ListPlugins(reply) => {
+                let _ = reply.send(self.summaries());
+            }
+            HostCmd::Reload { id } => {
+                self.stop_plugin(&id);
+                let dir = self.deps.plugins_dir.join(&id);
+                match Manifest::load(&dir) {
+                    Ok(manifest) => self.start_plugin(LoadedPlugin { id, dir, manifest }),
+                    Err(e) => {
+                        log::error!("reloading plugin {id} failed: {e}");
+                        self.emit(PluginEvent::Status { plugin: id, status: PluginStatus::NotInstalled });
+                    }
+                }
+            }
+            HostCmd::Remove { id } => {
+                self.stop_plugin(&id);
+                self.emit(PluginEvent::Status { plugin: id, status: PluginStatus::NotInstalled });
+            }
             HostCmd::Shutdown => {
                 self.deps.launcher.stop_all();
                 return false;
@@ -299,7 +382,7 @@ impl Host {
                     }
                     p.tx = Some(tx);
                 }
-                self.emit(PluginEvent::Status { plugin: id, status: PluginStatus::Running });
+                self.set_status(&id, PluginStatus::Running);
             }
             ServerEvent::Connected { who: Registrant::Pi { context, .. }, tx, .. } => {
                 if let Some(pi) = self.pis.get_mut(&context) {
@@ -313,7 +396,9 @@ impl Host {
                 if let Some(p) = self.plugins.get_mut(&id) {
                     p.tx = None;
                 }
-                self.emit(PluginEvent::Status { plugin: id, status: PluginStatus::Starting });
+                if self.plugins.contains_key(&id) {
+                    self.set_status(&id, PluginStatus::Starting);
+                }
             }
             ServerEvent::Disconnected { who: Registrant::Pi { context, .. }, uuid } => {
                 if let Some(pi) = self.pis.get_mut(&context) {

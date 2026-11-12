@@ -66,6 +66,18 @@ impl Launcher for CompositeLauncher {
         }
     }
 
+    fn stop(&mut self, id: &str) {
+        let label = window_label(id);
+        if let Some(pos) = self.html.labels.iter().position(|l| *l == label) {
+            self.html.labels.remove(pos);
+            if let Some(w) = self.html.app.get_webview_window(&label) {
+                let _ = w.close();
+            }
+        } else {
+            self.procs.stop(id);
+        }
+    }
+
     fn stop_all(&mut self) {
         for label in self.html.labels.drain(..) {
             if let Some(w) = self.html.app.get_webview_window(&label) {

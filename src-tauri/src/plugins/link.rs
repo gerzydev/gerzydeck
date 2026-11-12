@@ -39,7 +39,35 @@ pub enum HostCmd {
     TitleParams { key: KeyCtx, title: String },
     PiOpen { key: KeyCtx, reply: Sender<Option<PiInfo>> },
     PiClose { context: String },
+    ListPlugins(Sender<Vec<PluginSummary>>),
+    /// (re)load a plugin folder after install/update and start it
+    Reload { id: String },
+    /// stop and forget a plugin (before uninstall)
+    Remove { id: String },
     Shutdown,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionSummary {
+    pub uuid: String,
+    pub name: String,
+    pub icon: String,
+    pub tooltip: String,
+}
+
+/// Installed plugin as shown in the editor.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSummary {
+    pub id: String,
+    pub dir: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub icon: String,
+    pub status: PluginStatus,
+    pub actions: Vec<ActionSummary>,
 }
 
 /// Status of an installed plugin, shown in the editor.
