@@ -46,7 +46,10 @@
           "Czech",
           "English"
         ],
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "customLanguageFiles": {
+          "Czech": "nsis/Czech.nsh"
+        }
       }
     },
     "licenseFile": "LICENSE.txt",
