@@ -23,6 +23,7 @@ pub struct PiInfo {
     pub uuid: String,
     pub info: Value,
     pub action_info: Value,
+    pub context: String,
 }
 
 /// Engine → host.
@@ -50,6 +51,8 @@ pub enum PluginStatus {
     Crashed { restarts: u32 },
     MissingNode,
     NotInstalled,
+    /// manifest lists other operating systems only
+    Unsupported,
 }
 
 /// Host → engine (wrapped in `engine::Msg::Plugin`).
