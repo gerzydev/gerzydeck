@@ -78,6 +78,14 @@ impl Launcher for CompositeLauncher {
         }
     }
 
+    fn registered(&mut self, id: &str) {
+        self.procs.registered(id);
+    }
+
+    fn status(&self, id: &str) -> Option<crate::plugins::link::PluginStatus> {
+        self.procs.status(id)
+    }
+
     fn stop_all(&mut self) {
         for label in self.html.labels.drain(..) {
             if let Some(w) = self.html.app.get_webview_window(&label) {

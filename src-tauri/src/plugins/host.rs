@@ -31,6 +31,12 @@ pub trait Launcher: Send {
     fn start(&mut self, plugin: &LoadedPlugin, port: u16, uuid: &str, info: &str);
     fn stop(&mut self, id: &str);
     fn stop_all(&mut self);
+    /// the plugin registered over the WebSocket (supervisors stop their startup timeout)
+    fn registered(&mut self, _id: &str) {}
+    /// supervisor-side status (crashed, missing Node.js…); None = no opinion
+    fn status(&self, _id: &str) -> Option<PluginStatus> {
+        None
+    }
 }
 
 pub struct HostDeps {
@@ -364,6 +370,7 @@ impl Host {
                     }
                     p.tx = Some(tx);
                 }
+                self.deps.launcher.registered(&id);
                 self.set_status(&id, PluginStatus::Running);
             }
             ServerEvent::Connected { who: Registrant::Pi { context, .. }, tx, .. } => {
@@ -487,6 +494,18 @@ impl Host {
             .collect()
     }
 
+    /// Mirrors supervisor statuses (crash loops, missing Node.js) into the host.
+    fn poll_status(&mut self) {
+        let ids: Vec<String> = self.plugins.keys().cloned().collect();
+        for id in ids {
+            if let Some(st) = self.deps.launcher.status(&id) {
+                if self.plugins.get(&id).is_some_and(|p| p.status != st) && st != PluginStatus::Running {
+                    self.set_status(&id, st);
+                }
+            }
+        }
+    }
+
     fn poll_apps(&mut self) {
         let now: HashSet<String> = (self.deps.list_processes)().into_iter().map(|n| n.to_lowercase()).collect();
         let mut msgs = vec![];
@@ -567,7 +586,10 @@ async fn run(deps: HostDeps, rx: std::sync::mpsc::Receiver<HostCmd>) {
                 None => { host.deps.launcher.stop_all(); break }
             },
             Some(ev) = ev_rx.recv() => host.on_server(ev),
-            _ = apps_tick.tick() => host.poll_apps(),
+            _ = apps_tick.tick() => {
+                host.poll_apps();
+                host.poll_status();
+            }
         }
     }
 }

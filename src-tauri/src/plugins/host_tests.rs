@@ -34,6 +34,7 @@ struct FakeLauncher {
     /// test → fake plugin: raw messages the plugin should send to the host
     say: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
     stopped: Arc<Mutex<Vec<String>>>,
+    registered: Arc<Mutex<Vec<String>>>,
 }
 
 impl Launcher for FakeLauncher {
@@ -65,6 +66,9 @@ impl Launcher for FakeLauncher {
     }
     fn stop(&mut self, id: &str) {
         self.stopped.lock().unwrap().push(id.to_string());
+    }
+    fn registered(&mut self, id: &str) {
+        self.registered.lock().unwrap().push(id.to_string());
     }
     fn stop_all(&mut self) {}
 }
@@ -261,4 +265,11 @@ fn supervisor_status_shows_in_the_list() {
     h.tx.send(HostCmd::ListPlugins(r)).unwrap();
     let list = rx.recv_timeout(Duration::from_secs(2)).unwrap();
     assert!(list.iter().any(|p| p.status == super::link::PluginStatus::MissingNode || p.status == super::link::PluginStatus::Running));
+}
+
+#[test]
+fn registration_is_reported_to_the_launcher() {
+    let h = start();
+    h.wait_event(|e| matches!(e, PluginEvent::Status { status: super::link::PluginStatus::Running, .. }));
+    assert_eq!(h.fake.registered.lock().unwrap().as_slice(), ["com.fake".to_string()]);
 }
