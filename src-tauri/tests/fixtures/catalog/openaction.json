@@ -1,0 +1,32 @@
+{
+    "me.amankhanna.oacounter":  {
+                                    "name":  "Counter",
+                                    "author":  "nekename",
+                                    "repository":  "https://github.com/OpenActionPlugins/counter",
+                                    "description":  "An OpenAction plugin for incrementing a counter"
+                                },
+    "me.amankhanna.oadesktopentry":  {
+                                         "name":  "Linux App Launcher",
+                                         "author":  "nekename",
+                                         "repository":  "https://github.com/OpenActionPlugins/desktopentry",
+                                         "description":  "An OpenAction plugin for launching desktop applications on Linux"
+                                     },
+    "me.amankhanna.oadiscord":  {
+                                    "name":  "Discord",
+                                    "author":  "nekename",
+                                    "repository":  "https://github.com/OpenActionPlugins/discord",
+                                    "description":  "An OpenAction plugin for controlling the Discord desktop client"
+                                },
+    "me.amankhanna.oampris":  {
+                                  "name":  "Linux Media",
+                                  "author":  "nekename",
+                                  "repository":  "https://github.com/OpenActionPlugins/mpris",
+                                  "description":  "An OpenAction plugin for controlling media players on Linux using the MPRIS protocol"
+                              },
+    "me.amankhanna.oasystem":  {
+                                   "name":  "System Information",
+                                   "author":  "nekename",
+                                   "repository":  "https://github.com/OpenActionPlugins/system",
+                                   "description":  "An OpenAction plugin for displaying system information"
+                               }
+}
