@@ -1,0 +1,47 @@
+[
+    {
+        "id":  "com.barraider.soundpad",
+        "name":  "Soundpad Integration",
+        "author":  "BarRaider",
+        "link":  "https://barraider.github.io/",
+        "version":  "1.6",
+        "download":  "https://appstore.elgato.com/streamDeckPlugin/com.barraider.soundpad/1.6/com.barraider.soundpad.streamDeckPlugin",
+        "icon":  "https://appstore.elgato.com/streamDeckPlugin/com.barraider.soundpad/1.6/com.barraider.soundpad.png"
+    },
+    {
+        "id":  "net.telestream.wirecast",
+        "name":  "Wirecast Plugin",
+        "author":  "Telestream Inc.",
+        "link":  "https://www.telestream.net",
+        "version":  "1.4",
+        "download":  "https://appstore.elgato.com/streamDeckPlugin/net.telestream.wirecast/1.4/net.telestream.wirecast.streamDeckPlugin",
+        "icon":  "https://appstore.elgato.com/streamDeckPlugin/net.telestream.wirecast/1.4/net.telestream.wirecast.png"
+    },
+    {
+        "id":  "com.barraider.delayedtext",
+        "name":  "Delayed Text Input",
+        "author":  "BarRaider",
+        "link":  "https://github.com/BarRaider/streamdeck-delayedtext",
+        "version":  "1.01",
+        "download":  "https://appstore.elgato.com/streamDeckPlugin/com.barraider.delayedtext/1.01/com.barraider.delayedtext.streamDeckPlugin",
+        "icon":  "https://appstore.elgato.com/streamDeckPlugin/com.barraider.delayedtext/1.01/com.barraider.delayedtext.png"
+    },
+    {
+        "id":  "com.baptiewright.nanoleaf",
+        "name":  "Nanoleaf Controller",
+        "author":  "Baptiewright Designs",
+        "link":  "http://www.baptiewright.com",
+        "version":  "1.4",
+        "download":  "https://appstore.elgato.com/streamDeckPlugin/com.baptiewright.nanoleaf/1.4/com.baptiewright.nanoleaf.streamDeckPlugin",
+        "icon":  "https://appstore.elgato.com/streamDeckPlugin/com.baptiewright.nanoleaf/1.4/com.baptiewright.nanoleaf.png"
+    },
+    {
+        "id":  "de.kaleidox.vbandeck",
+        "name":  "VBANDeck",
+        "author":  "Kaleidox",
+        "link":  "https://github.com/burdoto/VBAN-StreamDeck-Plugin",
+        "version":  "1.0.2",
+        "download":  "https://appstore.elgato.com/streamDeckPlugin/de.kaleidox.vbandeck/1.0.2/de.kaleidox.vbandeck.streamDeckPlugin",
+        "icon":  "https://appstore.elgato.com/streamDeckPlugin/de.kaleidox.vbandeck/1.0.2/de.kaleidox.vbandeck.png"
+    }
+]
