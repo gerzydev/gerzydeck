@@ -70,8 +70,8 @@ pub fn coordinates(key: u8) -> Value {
 
 pub const DEVICE_NAME: &str = "Fifine D6";
 
-fn device_info() -> Value {
-    json!({ "name": DEVICE_NAME, "type": 0, "size": { "columns": 5, "rows": 3 } })
+fn device_info(device: &str) -> Value {
+    json!({ "id": device, "name": DEVICE_NAME, "type": 0, "size": { "columns": 5, "rows": 3 } })
 }
 
 /// The `-info` argument / `info` passed to `connectElgatoStreamDeckSocket`.
@@ -85,7 +85,7 @@ pub fn info_json(device: &str, plugin_uuid: &str, plugin_version: &str) -> Value
             "buttonPressedTextColor": "#969696FF", "disabledColor": "#F7821B59",
             "highlightColor": "#F7821BFF", "mouseDownColor": "#CF6304FF"
         },
-        "devices": [ { "id": device, "name": DEVICE_NAME, "type": 0, "size": { "columns": 5, "rows": 3 } } ]
+        "devices": [device_info(device)]
     })
 }
 
@@ -106,7 +106,7 @@ fn base(event: &str, c: &ActionCtx, payload: Value) -> Value {
 
 /// `keyDown` / `keyUp`.
 pub fn key_event(event: &str, c: &ActionCtx) -> Value {
-    base(event, c, json!({ "settings": c.settings, "coordinates": coordinates(c.key), "state": c.state, "isInMultiAction": false }))
+    base(event, c, json!({ "settings": c.settings, "coordinates": coordinates(c.key), "controller": "Keypad", "state": c.state, "isInMultiAction": false }))
 }
 
 /// `willAppear` / `willDisappear`.
@@ -115,7 +115,7 @@ pub fn appear_event(event: &str, c: &ActionCtx) -> Value {
 }
 
 pub fn did_receive_settings(c: &ActionCtx) -> Value {
-    base("didReceiveSettings", c, json!({ "settings": c.settings, "coordinates": coordinates(c.key), "isInMultiAction": false }))
+    base("didReceiveSettings", c, json!({ "settings": c.settings, "coordinates": coordinates(c.key), "controller": "Keypad", "isInMultiAction": false }))
 }
 
 pub fn title_parameters_did_change(c: &ActionCtx, title: &str, show: bool, size: u32, color: &str, align: &str) -> Value {
@@ -139,7 +139,7 @@ pub fn did_receive_global_settings(settings: &Value) -> Value {
 }
 
 pub fn device_did_connect(device: &str) -> Value {
-    json!({ "event": "deviceDidConnect", "device": device, "deviceInfo": device_info() })
+    json!({ "event": "deviceDidConnect", "device": device, "deviceInfo": device_info(device) })
 }
 
 pub fn device_did_disconnect(device: &str) -> Value {
@@ -157,7 +157,109 @@ pub fn system_did_wake_up() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
     use serde_json::json;
+
+    // Required wire fields match OpenAction's MIT-licensed inbound schemas:
+    // https://github.com/OpenActionAPI/rust/blob/main/src/inbound/devices.rs
+    // https://github.com/OpenActionAPI/rust/blob/main/src/inbound/mod.rs
+    // Keep these independent of our builders so missing SDK fields fail decoding.
+    #[derive(Deserialize)]
+    struct OpenActionDeviceSize {
+        rows: u8,
+        columns: u8,
+    }
+
+    #[derive(Deserialize)]
+    struct OpenActionDevice {
+        id: String,
+        name: String,
+        size: OpenActionDeviceSize,
+        #[serde(rename = "type")]
+        device_type: u8,
+    }
+
+    #[derive(Deserialize)]
+    struct OpenActionDeviceConnected {
+        device: String,
+        #[serde(rename = "deviceInfo")]
+        device_info: OpenActionDevice,
+    }
+
+    #[derive(Deserialize)]
+    struct OpenActionInfo {
+        devices: Vec<OpenActionDevice>,
+    }
+
+    #[derive(Deserialize)]
+    struct OpenActionCoordinates {
+        row: u8,
+        column: u8,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct OpenActionInstancePayload {
+        settings: Value,
+        coordinates: Option<OpenActionCoordinates>,
+        controller: String,
+        #[serde(default)]
+        state: u16,
+        is_in_multi_action: bool,
+    }
+
+    #[derive(Deserialize)]
+    struct OpenActionInstanceEvent {
+        action: String,
+        context: String,
+        device: String,
+        payload: OpenActionInstancePayload,
+    }
+
+    #[test]
+    fn outbound_devices_decode_with_openaction_required_fields() {
+        let connected: OpenActionDeviceConnected =
+            serde_json::from_value(device_did_connect("D6-test")).unwrap();
+        assert_eq!(connected.device, "D6-test");
+        let info: OpenActionInfo =
+            serde_json::from_value(info_json("D6-test", "plugin", "1.0")).unwrap();
+        assert_eq!(info.devices.len(), 1);
+        for device in [&connected.device_info, &info.devices[0]] {
+            assert_eq!(device.id, "D6-test");
+            assert_eq!(device.name, DEVICE_NAME);
+            assert_eq!(device.device_type, 0);
+            assert_eq!((device.size.columns, device.size.rows), (5, 3));
+        }
+    }
+
+    #[test]
+    fn outbound_instance_events_decode_with_openaction_required_fields() {
+        let ctx = ActionCtx {
+            action: "test.action".into(), context: "profile:12".into(),
+            device: "D6-test".into(), key: 12,
+            settings: json!({"configured": true}), state: 1,
+        };
+        for value in [
+            appear_event("willAppear", &ctx),
+            appear_event("willDisappear", &ctx),
+            key_event("keyDown", &ctx),
+            key_event("keyUp", &ctx),
+            did_receive_settings(&ctx),
+        ] {
+            let event_name = value["event"].as_str().unwrap().to_owned();
+            let event: OpenActionInstanceEvent = serde_json::from_value(value)
+                .unwrap_or_else(|error| panic!("{event_name}: {error}"));
+            assert_eq!(event.action, ctx.action);
+            assert_eq!(event.context, ctx.context);
+            assert_eq!(event.device, ctx.device);
+            assert_eq!(event.payload.settings, ctx.settings);
+            assert_eq!(event.payload.controller, "Keypad");
+            assert!(!event.payload.is_in_multi_action);
+            assert_eq!(event.payload.state, if event_name == "didReceiveSettings" { 0 } else { 1 });
+            let coordinates = event.payload.coordinates.unwrap();
+            assert_eq!((coordinates.column, coordinates.row), (1, 2));
+        }
+    }
 
     fn parse(v: serde_json::Value) -> Inbound {
         parse_inbound(&v.to_string())
