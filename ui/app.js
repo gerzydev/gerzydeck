@@ -121,7 +121,8 @@ function fillTile(btn, cfg, k) {
   if (cfg.image) {
     const img = h('img', { alt: '' });
     imageUrl(cfg.image).then((u) => { if (u) img.src = u; });
-    btn.append(img, h('span', { class: 'shade' }));
+    btn.append(img);
+    if (cfg.label) btn.append(h('span', { class: 'shade' }));
   }
   if (cfg.label) btn.append(h('span', { class: `lbl ${cfg.image ? 'bottom' : 'center'}` }, cfg.label));
   btn.append(h('span', { class: 'num' }, k));

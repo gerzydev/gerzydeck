@@ -117,6 +117,46 @@ fn draw_label(canvas: &mut RgbImage, label: &str, with_image: bool) {
     draw_text_mut(canvas, LABEL_COLOR, x.max(1), y, scale, font, &text);
 }
 
+/// Matches the editor preview (12 px on a 92 px tile).
+const CORNER_RADIUS: f32 = 13.0;
+
+/// Fades pixels outside a rounded rectangle to black, anti-aliased with 4×4 supersampling.
+fn round_corners(img: &mut RgbImage, r: f32) {
+    let size = img.width() as f32;
+    let coverage = |px: u32, py: u32| -> f32 {
+        let mut inside = 0;
+        for sy in 0..4 {
+            for sx in 0..4 {
+                let x = px as f32 + (sx as f32 + 0.5) / 4.0;
+                let y = py as f32 + (sy as f32 + 0.5) / 4.0;
+                let cx = x.clamp(r, size - r);
+                let cy = y.clamp(r, size - r);
+                if (x - cx).powi(2) + (y - cy).powi(2) <= r * r {
+                    inside += 1;
+                }
+            }
+        }
+        inside as f32 / 16.0
+    };
+    let edge = r.ceil() as u32;
+    for y in 0..img.height() {
+        for x in 0..img.width() {
+            let near_x = x < edge || x >= img.width() - edge;
+            let near_y = y < edge || y >= img.height() - edge;
+            if !(near_x && near_y) {
+                continue;
+            }
+            let a = coverage(x, y);
+            if a < 1.0 {
+                let p = img.get_pixel_mut(x, y);
+                for c in 0..3 {
+                    p[c] = (p[c] as f32 * a).round() as u8;
+                }
+            }
+        }
+    }
+}
+
 /// One key → 100×100 baseline JPEG, rotated 180° for the inverted panels. Never fails.
 pub fn render_key_jpeg(spec: &KeySpec) -> Vec<u8> {
     let bg = Rgb(spec.bg);
@@ -136,6 +176,7 @@ pub fn render_key_jpeg(spec: &KeySpec) -> Vec<u8> {
     if !spec.label.is_empty() {
         draw_label(&mut canvas, &spec.label, has_image);
     }
+    round_corners(&mut canvas, CORNER_RADIUS);
     let rotated = imageops::rotate180(&canvas);
     let mut jpeg = Vec::new();
     JpegEncoder::new_with_quality(&mut jpeg, 90)
@@ -305,6 +346,32 @@ mod tests {
         assert_eq!(jpeg_markers(&clean_baseline_jpeg(&no_app0)), vec![0xD8, 0xE0, 0xDB, 0xDA]);
     }
 
+    /// The tile on the deck should look like the editor preview: rounded corners, black outside.
+    #[test]
+    fn tile_has_rounded_black_corners() {
+        let white = image::RgbImage::from_pixel(200, 200, Rgb([255, 255, 255]));
+        let j = render_key_jpeg(&KeySpec { image: Some(png_of(&white.into())), label: String::new(), bg: [255, 255, 255] });
+        let out = image::load_from_memory(&j).unwrap().to_rgb8();
+        for (x, y) in [(0, 0), (99, 0), (0, 99), (99, 99), (2, 2)] {
+            assert!(out.get_pixel(x, y)[0] < 40, "corner ({x},{y}) not black: {:?}", out.get_pixel(x, y));
+        }
+        for (x, y) in [(50, 50), (50, 1), (1, 50), (50, 98)] {
+            assert!(out.get_pixel(x, y)[0] > 215, "edge/centre ({x},{y}) should keep the image: {:?}", out.get_pixel(x, y));
+        }
+    }
+
+    /// Chroma subsampling would make coloured edges blocky at 100×100 (guard; the image encoder is 4:4:4).
+    #[test]
+    fn key_jpeg_has_full_chroma_resolution() {
+        let j = render_key_jpeg(&KeySpec { image: None, label: "Ab".into(), bg: [0x33, 0x66, 0x99] });
+        let sof = j.windows(2).position(|w| w == [0xFF, 0xC0]).expect("SOF0") + 2;
+        let ncomp = j[sof + 7] as usize;
+        assert_eq!(ncomp, 3);
+        for c in 0..ncomp {
+            assert_eq!(j[sof + 8 + c * 3 + 1], 0x11, "component {c} is subsampled");
+        }
+    }
+
     #[test]
     fn hex_colors() {
         assert_eq!(parse_hex("#336699"), [0x33, 0x66, 0x99]);
@@ -323,11 +390,13 @@ mod preview {
         let purple = image::RgbImage::from_pixel(200, 200, Rgb([0x8a, 0x2b, 0xe2]));
         let mut png = Vec::new();
         image::DynamicImage::from(purple).write_to(&mut Cursor::new(&mut png), ImageFormat::Png).unwrap();
+        let extra = std::env::var("DECK_PREVIEW_IMAGE").ok().and_then(|p| std::fs::read(p).ok());
         let specs = [
             KeySpec { image: None, label: "Fireball".into(), bg: [0x33, 0x66, 0x99] },
             KeySpec { image: Some(png), label: "Ohnivá koule".into(), bg: DEFAULT_BG },
+            KeySpec { image: extra, label: String::new(), bg: DEFAULT_BG },
         ];
-        let mut sheet = RgbImage::from_pixel(220, 100, Rgb([255, 255, 255]));
+        let mut sheet = RgbImage::from_pixel(340, 100, Rgb([255, 255, 255]));
         for (i, s) in specs.iter().enumerate() {
             let tile = imageops::rotate180(&image::load_from_memory(&render_key_jpeg(s)).unwrap().to_rgb8());
             imageops::overlay(&mut sheet, &tile, i as i64 * 120, 0);
