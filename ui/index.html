@@ -1,3 +1,9 @@
 <!doctype html>
 <html lang="cs"><head><meta charset="utf-8"><title>Gerzy's deck</title></head>
-<body><p>Gerzy's deck</p></body></html>
+<body style="font-family:Segoe UI;background:#0c0d0f;color:#eef0f2">
+<h1>Gerzy's deck</h1><pre id="s">…</pre>
+<script>
+const { invoke } = window.__TAURI__.core; const { listen } = window.__TAURI__.event;
+const show = (s) => document.getElementById('s').textContent = JSON.stringify(s, null, 2);
+invoke('get_state').then(show); listen('deck://state', (e) => show(e.payload));
+</script></body></html>

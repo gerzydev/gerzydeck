@@ -8,3 +8,4 @@ pub mod keyboard;
 pub mod runner;
 pub mod os;
 pub mod engine;
+pub mod commands;

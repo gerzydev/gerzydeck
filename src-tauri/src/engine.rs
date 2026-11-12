@@ -122,6 +122,7 @@ impl Engine {
     }
 
     fn activate(&mut self, id: String) {
+        log::info!("profile -> {id}");
         self.previous_profile = Some(std::mem::replace(&mut self.state.active_profile_id, id));
         self.emit_state();
         self.render_active();
@@ -225,12 +226,14 @@ impl Engine {
     fn handle(&mut self, msg: Msg) -> bool {
         match msg {
             Msg::Device(DeviceEvent::Connected) => {
+                log::info!("deck connected");
                 self.state.connected = true;
                 self.rendered.clear();
                 self.emit_state();
                 self.render_active();
             }
             Msg::Device(DeviceEvent::Disconnected) => {
+                log::info!("deck disconnected");
                 self.runner.release_all();
                 self.state.connected = false;
                 self.emit_state();
