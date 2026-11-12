@@ -3,6 +3,8 @@
 //! Run from the repository root:
 //! `cargo run --manifest-path src-tauri/Cargo.toml --bin plugin_smoke -- .superpowers/plugin-smoke`
 //! Add `--only <plugin-id>` after the artifact directory for a single target.
+//! `--action <uuid> --press` exercises a specific action. `--capture-node-browser`
+//! intercepts Node browser commands in the isolated installed copy only.
 //! Archives/source URLs are cached once; every run installs fresh isolated copies,
 //! observes each for 30 seconds, stops its process tree and preserves JSON/log artifacts.
 //! Logs combine stdout and stderr, so their individual provenance cannot be recovered.
@@ -69,6 +71,7 @@ impl log::Log for SmokeLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
         metadata.target() == "plugin_wire"
             || metadata.target() == "plugin_process"
+            || metadata.target() == module_path!()
             || (metadata.target().starts_with("gerzys_deck::plugins")
                 && metadata.level() <= log::Level::Info)
     }
@@ -162,6 +165,64 @@ struct SmokeResult {
     log_path: PathBuf,
     combined_output_bytes: u64,
     error: Option<String>,
+    pressed: bool,
+    browser_requests: Vec<String>,
+}
+
+fn select_action<'a>(actions: &'a [&str], wanted: Option<&str>) -> Option<&'a str> {
+    match wanted {
+        Some(wanted) => actions.iter().copied().find(|action| *action == wanted),
+        None => actions.first().copied(),
+    }
+}
+
+fn browser_requests(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("SMOKE_BROWSER_REQUEST ")
+                .and_then(|value| serde_json::from_str::<String>(value).ok())
+        })
+        .collect()
+}
+
+/// Smoke-only shim, scoped to a freshly installed temporary plugin copy. The
+/// original archive, user's installation, process environment and host are untouched.
+fn capture_node_browser(plugin: &LoadedPlugin) -> Result<()> {
+    let gerzys_deck::plugins::manifest::Runtime::Node { script, .. } =
+        plugin.manifest.runtime(&plugin.dir)?
+    else {
+        anyhow::bail!("--capture-node-browser requires a Node plugin");
+    };
+    let source = fs::read_to_string(&script)?;
+    let shim = script
+        .parent()
+        .context("Node script parent")?
+        .join("smoke-browser.cjs");
+    fs::write(
+        &shim,
+        r#"const cp = require('node:child_process');
+const { syncBuiltinESMExports } = require('node:module');
+const { EventEmitter } = require('node:events');
+const original = cp.exec;
+cp.exec = (command, ...args) => {
+  const browser = /^(?:start|open|xdg-open)\s+(https?:\/\/\S+)\s*$/.exec(command);
+  if (!browser) return original(command, ...args);
+  console.log('SMOKE_BROWSER_REQUEST ' + JSON.stringify(browser[1]));
+  const callback = args.find(value => typeof value === 'function');
+  if (callback) queueMicrotask(() => callback(null, '', ''));
+  return new EventEmitter();
+};
+syncBuiltinESMExports();
+"#,
+    )?;
+    fs::write(script, format!("import './smoke-browser.cjs';\n{source}"))?;
+    Ok(())
+}
+
+fn record_open_url(url: &str) {
+    // Opt-in harness: record SDK browser requests without opening the browser.
+    log::info!("SMOKE_SDK_OPEN_URL {url}");
 }
 
 fn entry(id: &str, repo: Option<&str>) -> CatalogEntry {
@@ -225,12 +286,13 @@ fn event_name(event: &PluginEvent) -> &'static str {
     }
 }
 
-fn observe(plugin: &LoadedPlugin, plugin_root: &Path, logs: &Path) -> Result<Vec<String>> {
-    let action = plugin
-        .manifest
-        .keypad_actions()
-        .next()
-        .context("no keypad action")?;
+fn observe(
+    plugin: &LoadedPlugin,
+    plugin_root: &Path,
+    logs: &Path,
+    action: &str,
+    press: bool,
+) -> Result<Vec<String>> {
     let (events_tx, events_rx) = mpsc::channel();
     let (stop_tx, stop_rx) = mpsc::channel();
     let mut guard = HostGuard {
@@ -245,37 +307,68 @@ fn observe(plugin: &LoadedPlugin, plugin_root: &Path, logs: &Path) -> Result<Vec
                 let _ = events_tx.send(event);
             }),
             decode_image: gerzys_deck::plugins::image::decode_plugin_image,
-            open_url: |_| {},
+            open_url: record_open_url,
             list_processes: Vec::new,
         }),
         stopped: Some(stop_rx),
     };
     let deadline = Instant::now() + Duration::from_secs(30);
     guard.tx.send(HostCmd::DeviceConnected)?;
-    guard.tx.send(HostCmd::WillAppear(KeyCtx {
+    let key = KeyCtx {
         plugin: plugin.id.clone(),
         ctx: ActionCtx {
-            action: action.uuid.clone(),
+            action: action.to_owned(),
             context: format!("smoke:{}:1", plugin.id),
             device: DEVICE_ID.into(),
             key: 1,
             settings: json!({}),
             state: 0,
         },
-    }))?;
+    };
+    guard.tx.send(HostCmd::WillAppear(key.clone()))?;
     let mut events = BTreeSet::new();
+    let mut press_at = None;
+    let mut pressed = false;
+    let mut released = false;
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-        match events_rx.recv_timeout(remaining) {
+        if press && !pressed && press_at.is_some_and(|at| Instant::now() >= at) {
+            guard.tx.send(HostCmd::KeyDown(key.clone()))?;
+            pressed = true;
+            log::info!("SMOKE_KEY_DOWN {} {action}", plugin.id);
+        }
+        if pressed
+            && !released
+            && press_at.is_some_and(|at| Instant::now() >= at + Duration::from_millis(100))
+        {
+            guard.tx.send(HostCmd::KeyUp(key.clone()))?;
+            released = true;
+            log::info!("SMOKE_KEY_UP {} {action}", plugin.id);
+        }
+        match events_rx.recv_timeout(remaining.min(Duration::from_millis(50))) {
             Ok(event) => {
+                if press
+                    && press_at.is_none()
+                    && matches!(
+                        event,
+                        PluginEvent::Status {
+                            status: PluginStatus::Running,
+                            ..
+                        }
+                    )
+                {
+                    // Let the real SDK consume willAppear/global settings first.
+                    press_at = Some(Instant::now() + Duration::from_secs(2));
+                }
                 events.insert(event_name(&event).to_owned());
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 anyhow::bail!("host event channel disconnected")
             }
         }
     }
     guard.shutdown()?;
+    anyhow::ensure!(!press || released, "plugin never registered for key press");
     Ok(events.into_iter().collect())
 }
 
@@ -286,6 +379,16 @@ async fn main() -> Result<()> {
         .windows(2)
         .find(|a| a[0] == "--only")
         .map(|a| a[1].clone());
+    let wanted = args
+        .windows(2)
+        .find(|a| a[0] == "--action")
+        .map(|a| a[1].as_str());
+    let press = args.iter().any(|a| a == "--press");
+    let capture_browser = args.iter().any(|a| a == "--capture-node-browser");
+    anyhow::ensure!(
+        !capture_browser || (press && only.is_some()),
+        "browser capture requires --only and --press"
+    );
     let root = std::env::args_os()
         .nth(1)
         .map(PathBuf::from)
@@ -344,18 +447,27 @@ async fn main() -> Result<()> {
             log_path: logs.join(format!("{}.log", target.id)),
             combined_output_bytes: 0,
             error: None,
+            pressed: false,
+            browser_requests: Vec::new(),
         };
         let result: Result<()> = async {
             let (bytes, url) = cached_archive(&client, &root.join("cache"), &target).await?;
             row.source_url = Some(url);
             let plugin = install_from_zip(&bytes, &plugins, Some(&target.id))?;
             row.version = plugin.manifest.version.clone();
-            row.action = plugin
+            let actions: Vec<_> = plugin
                 .manifest
                 .keypad_actions()
-                .next()
-                .map(|a| a.uuid.clone());
-            row.host_events = observe(&plugin, &plugins, &logs)?;
+                .map(|a| a.uuid.as_str())
+                .collect();
+            let action =
+                select_action(&actions, wanted).context("requested keypad action missing")?;
+            row.action = Some(action.to_owned());
+            if capture_browser {
+                capture_node_browser(&plugin)?;
+            }
+            row.host_events = observe(&plugin, &plugins, &logs, action, press)?;
+            row.pressed = press;
             Ok(())
         }
         .await;
@@ -369,6 +481,8 @@ async fn main() -> Result<()> {
                 .map_err(|_| anyhow::anyhow!("diagnostic mutex poisoned"))?,
         );
         row.combined_output_bytes = fs::metadata(&row.log_path).map(|m| m.len()).unwrap_or(0);
+        row.browser_requests =
+            browser_requests(&fs::read_to_string(&row.log_path).unwrap_or_default());
         println!("{}", serde_json::to_string(&row)?);
         results.push(row);
         fs::write(
@@ -418,5 +532,23 @@ mod tests {
             ],
         );
         assert!(!row.launched && !row.registered && !row.set_image && !row.set_title);
+    }
+
+    #[test]
+    fn explicit_action_and_browser_capture_are_opt_in() {
+        let actions = vec!["setup", "play-pause"];
+        assert_eq!(select_action(&actions, None), Some("setup"));
+        assert_eq!(
+            select_action(&actions, Some("play-pause")),
+            Some("play-pause")
+        );
+        assert_eq!(select_action(&actions, Some("missing")), None);
+        assert_eq!(
+            browser_requests(
+                "normal output\nSMOKE_BROWSER_REQUEST \"http://127.0.0.1:6545/?lang=cs\"\n"
+            ),
+            vec!["http://127.0.0.1:6545/?lang=cs"]
+        );
+        assert!(browser_requests("SMOKE_BROWSER_REQUEST not-json\n").is_empty());
     }
 }
