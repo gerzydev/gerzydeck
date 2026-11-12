@@ -7,6 +7,7 @@ pub mod link;
 pub mod manifest;
 pub mod protocol;
 pub mod server;
+pub mod webview;
 pub mod scheme;
 
 /// `%APPDATA%\GerzysDeck\plugins`
