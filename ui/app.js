@@ -86,6 +86,12 @@ function save() {
   }, 300);
 }
 
+/** Pushes pending edits now (the core must know a key's new action before its property inspector opens). */
+async function saveNow() {
+  clearTimeout(saveTimer);
+  try { await invoke('set_config', { config }); } catch (e) { toast(e); }
+}
+
 const activeId = () => state.activeProfileId || config.activeProfileId;
 const activeProfile = () => config.profiles.find((p) => p.id === activeId()) ?? config.profiles[0];
 const keyCfg = (k) => activeProfile().keys[String(k)];
@@ -585,7 +591,7 @@ function applyTheme(choice) {
 }
 
 // ---------- boot ----------
-const ui = { h, invoke, toast, svgIcon, save: () => save(), renderDeck: () => renderDeck() };
+const ui = { h, invoke, toast, svgIcon, save: () => save(), saveNow: () => saveNow(), renderDeck: () => renderDeck() };
 
 async function boot() {
   let theme = 'auto';

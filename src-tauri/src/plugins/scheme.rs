@@ -104,11 +104,12 @@ const BOOTSTRAP: &str = r#"<script>(function(){
       st.textContent = 'html,body{overflow-x:hidden!important;max-width:100%}';
       document.head.appendChild(st);
       // height of the real content (body is often height:100%, so scrollHeight would never shrink)
+      // measure every element: SPA pages wrap content in zero-height or display:contents nodes
       var contentHeight = function () {
-        var bottom = 0, kids = document.body ? document.body.children : [];
-        for (var i = 0; i < kids.length; i++) {
-          var r = kids[i].getBoundingClientRect();
-          if (r.height > 0) bottom = Math.max(bottom, r.bottom + window.scrollY);
+        var bottom = 0, all = document.body ? document.body.getElementsByTagName('*') : [];
+        for (var i = 0; i < all.length && i < 5000; i++) {
+          var r = all[i].getBoundingClientRect();
+          if (r.height > 0 && r.width > 0) bottom = Math.max(bottom, r.bottom + window.scrollY);
         }
         return Math.ceil(bottom + 16);
       };

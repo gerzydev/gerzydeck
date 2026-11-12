@@ -228,7 +228,8 @@ export function pluginActionFields(ui, profileId, key, cfg, onChange) {
   const frame = h('iframe', { class: 'pi-frame', title: 'Nastavení akce pluginu' });
   const note = h('div', { class: 'rm-meta' }, 'Načítám nastavení pluginu…');
   closePi(ui);
-  ui.invoke('pi_open', { profileId, key }).then((pi) => {
+  // the core must know this key's current action first, or it opens the previous action's page
+  ui.saveNow().then(() => ui.invoke('pi_open', { profileId, key })).then((pi) => {
     if (!pi) { note.textContent = 'Tahle akce nemá žádné nastavení.'; frame.remove(); return; }
     openPi = pi.context ?? `${profileId}:${key}`;
     frame.src = pi.url;
