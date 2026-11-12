@@ -1,63 +1,82 @@
-# gerzyDECK (Gerzy's deck)
+# gerzyDECK
 
-Neoficiální software pro **Fifine AmpliGame D6** (15 tlačítek s displejem) na Windows. Nahrazuje aplikaci od Fifine.
+Unofficial Windows software for the **Fifine AmpliGame D6** (15 LCD keys), a replacement for the vendor app. Built with Rust and Tauri.
 
-## Co umí
+![Deck editor](docs/screenshots/deck.png)
 
-- **Tlačítka:** vlastní obrázky (katalog ikon, vlastní ikony, balíky ikon), popisky a barva pozadí, přetahování tlačítek myší.
-- **Akce:** klávesa nebo zkratka, makro, spuštění programu nebo webu, média a hlasitost, zamknutí nebo uspání PC, přepnutí profilu.
-- **Profily:** každý má 15 tlačítek a může se sám přepnout podle programu v popředí (např. `wow.exe`).
-- **Pluginy pro Stream Deck:** instalace přímo v aplikaci z katalogů OpenAction a archivu Elgato (OBS, Spotify, Discord, PC metriky a další).
-- **Využití AI:** tlačítka s procenty limitů Claude a ChatGPT (Codex) a časem do resetu.
-- **Ikony:** katalog Iconify (přes 200 000 open-source ikon), knihovna vlastních ikon a import balíků `.streamDeckIconPack`.
-- **Boot logo:** vlastní obrázek 800 × 480, který deck ukáže po zapojení.
+## Features
 
-Program běží v oznamovací oblasti (tray). Editor se otevře kliknutím na ikonu a zavřením okna se program neukončí.
+- **Keys:** your own images (icon catalogue, your icons, icon packs), labels and background colour; drag a key onto another to swap them.
+- **Actions:** key or shortcut, macro, launch a program or website, media and volume, lock or sleep the PC, switch profile.
+- **Profiles:** 15 keys each, switching automatically by the program in the foreground (e.g. `wow.exe`).
+- **Stream Deck plugins:** install straight from the app, from the OpenAction catalogue and the Elgato store archive (OBS, Spotify, Discord, PC metrics and hundreds more).
+- **AI usage:** keys showing your Claude and ChatGPT (Codex) plan limits and the time until they reset.
+- **Icons:** the Iconify catalogue (over 200,000 open-source icons), your own icon library and `.streamDeckIconPack` import.
+- **Boot logo:** your own 800 × 480 image shown when the deck is plugged in.
+- **Languages:** English and Czech.
 
-## Instalace
+The program lives in the notification area (tray). Click the icon to open the editor; closing the window keeps it running.
 
-1. Ukonči aplikaci **fifine Control Deck** (i v trayi) a vypni jí spouštění s Windows. Jinak se budou o deck přetahovat.
-2. Spusť `Gerzys Deck_<verze>_x64-setup.exe` a odsouhlas licenční podmínky.
-3. V editoru v **Nastavení** zapni „Spouštět s Windows“.
+| Plugins | Icons |
+| --- | --- |
+| ![Plugins](docs/screenshots/plugins.png) | ![Icons](docs/screenshots/icons.png) |
 
-Nastavení, obrázky, ikony a pluginy jsou uložené v `%APPDATA%\GerzysDeck`.
+| Settings | Boot logo |
+| --- | --- |
+| ![Settings](docs/screenshots/settings.png) | ![Boot logo](docs/screenshots/boot-logo.png) |
 
-## Důležité upozornění
+## Installation
 
-Software je neoficiální a používáš ho **na vlastní nebezpečí**. Celé podmínky jsou v souboru `LICENSE.txt`, který se zobrazí při instalaci. Hlavně:
+1. Quit **fifine Control Deck** (including its tray icon) and disable its autostart, otherwise both apps fight over the deck.
+2. Run `Gerzys Deck_<version>_x64-setup.exe` and accept the license terms.
+3. In the editor, open **Settings** and turn on "Start with Windows".
 
-- **Boot logo** se zapisuje do trvalé paměti decku. Formát byl převzat z oficiální aplikace a ověřen, ale chyba při zápisu (třeba odpojení decku nebo jiný program, který do decku zrovna píše) může deck v krajním případě poškodit.
-- **Využití AI** čte neveřejná rozhraní Anthropic a OpenAI s přihlášením z Claude Code a Codexu a při vypršení ho obnovuje. Rozhraní se může kdykoli změnit nebo přestat fungovat.
-- **Pluginy** jsou programy třetích stran a běží na tvém počítači. Instaluj jen ty, kterým věříš.
-- **Klávesy a makra:** některé hry (anticheat) simulované klávesy zakazují. Ve WoW je víc herních akcí na jedno zmáčknutí proti pravidlům Blizzardu.
+Settings, images, icons and plugins are stored in `%APPDATA%\GerzysDeck`.
 
-## Vývoj
+## Important
 
-Potřebuješ Rust (rustup, MSVC), Microsoft C++ Build Tools a Node.js (kvůli Tauri CLI).
+This is unofficial software and you use it **at your own risk**. The full terms are in [`src-tauri/LICENSE.txt`](src-tauri/LICENSE.txt) and are shown by the installer. In short:
+
+- **Boot logo** is written to the deck's persistent memory. The format was captured from the official app and verified, but an interrupted write (unplugging the deck, or another program writing to it at the same time) could damage the device in the worst case.
+- **AI usage** reads undocumented Anthropic and OpenAI interfaces with the logins of Claude Code and Codex, and refreshes them when they expire. These interfaces may change or stop working at any time.
+- **Plugins** are third-party programs running on your computer. Only install ones you trust.
+- **Keys and macros:** some games (anti-cheat) forbid simulated input. In World of Warcraft, more than one game action per key press breaks Blizzard's rules.
+
+## Development
+
+You need Rust (rustup, MSVC toolchain), the Microsoft C++ Build Tools and Node.js (for the Tauri CLI).
 
 ```powershell
 npm install
-npm run dev        # spustí aplikaci v režimu vývoje
-npm run build      # vyrobí instalátor (src-tauri/target/release/bundle/nsis/)
+npm run dev        # run the app in development mode
+npm run build      # build the installer (src-tauri/target/release/bundle/nsis/)
 cd src-tauri
-cargo test --lib   # testy
+cargo test --lib   # tests
 ```
 
-### Diagnostika decku
+### Device diagnostics
 
-Spouštěj, jen když gerzyDECK ani aplikace Fifine neběží.
+Run these only while neither gerzyDECK nor the Fifine app is running.
 
 ```powershell
 cd src-tauri
-cargo run --bin diag                # čísla 1–15 na tlačítkách + výpis stisků
-cargo run --bin diag -- --frame104  # měřicí rámečky (displej tlačítka má 104×104 px)
-cargo run --bin diag -- --type      # test kláves (klikni do Poznámkového bloku)
-cargo run --bin boot_logo_replay -- obrazek.png   # nahraje boot logo
+cargo run --bin diag                # numbers 1–15 on the keys + key press log
+cargo run --bin diag -- --frame104  # measuring frames (a key's display is 104×104 px)
+cargo run --bin diag -- --type      # keyboard output test (click into Notepad)
+cargo run --bin boot_logo_replay -- image.png   # upload a boot logo
 ```
 
-## Poznámky
+## Notes
 
-- Klávesy se posílají jako scan kódy (podle pozice na klávesnici), takže je hry berou jako opravdovou klávesnici.
-- Do oken spuštěných jako správce Windows klávesy nepustí. Editor na to upozorní.
-- Protokol decku vychází z [fifine-ampligame-d6](https://github.com/micah1crandell/fifine-ampligame-d6) (MIT). Boot logo bylo zachyceno z oficiální aplikace. Displej tlačítka má 104×104 px, boot logo 800×480 (mřížka 5×3 po 160 px).
-- Ikony v katalogu pocházejí z [Iconify](https://iconify.design). Každá sada má vlastní licenci.
+- Keys are sent as scan codes (by position on the keyboard), so games see them as a real keyboard.
+- Windows does not let keys into windows running as administrator; the editor warns about it.
+- A key's display is 104×104 px; the boot logo is 800×480, laid out as a 5×3 grid of 160 px cells (one cell per key).
+
+## Credits
+
+- Device protocol based on [fifine-ampligame-d6](https://github.com/micah1crandell/fifine-ampligame-d6) (MIT); the boot logo command was captured from the official app.
+- Stream Deck SDK compatible plugin host; plugins from the [OpenAction](https://openaction.amankhanna.me) catalogue and the Elgato store archive.
+- Icons from [Iconify](https://iconify.design); every icon set has its own license.
+- Built with [Tauri](https://tauri.app).
+
+gerzyDECK is not affiliated with Fifine, Mirabox, Elgato/Corsair, Anthropic or OpenAI. All trademarks belong to their owners.
