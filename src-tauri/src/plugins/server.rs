@@ -112,6 +112,22 @@ fn check_origin(req: &Request, resp: Response) -> Result<Response, ErrorResponse
     }
 }
 
+/// Diagnostic metadata only: never log SDK payloads or registration tokens.
+fn wire_diagnostic(who: &Registrant, text: &str, msg: &Inbound) -> serde_json::Value {
+    let plugin = match who {
+        Registrant::Plugin(id) | Registrant::Pi { plugin: id, .. } => id,
+    };
+    let event = serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| {
+        v.get("event").and_then(|e| e.as_str()).map(|s| s.chars().take(128).collect::<String>())
+    });
+    let classification = match msg {
+        Inbound::Unknown => "unknown",
+        Inbound::Invalid => "invalid",
+        _ => "known",
+    };
+    serde_json::json!({"plugin":plugin,"kind":"inbound","event":event,"classification":classification})
+}
+
 async fn handle(stream: TcpStream, tokens: Arc<Tokens>, events: UnboundedSender<ServerEvent>, opts: ServerOptions) -> anyhow::Result<()> {
     let ws = tokio_tungstenite::accept_hdr_async(stream, check_origin).await?;
     let (mut sink, mut source) = ws.split();
@@ -137,6 +153,9 @@ async fn handle(stream: TcpStream, tokens: Arc<Tokens>, events: UnboundedSender<
         let _ = sink.close().await;
         anyhow::bail!("registration rejected");
     }
+    if let Registrant::Plugin(id) = &who {
+        log::debug!(target: "plugin_wire", "{}", serde_json::json!({"plugin":id,"kind":"registered"}));
+    }
 
     let (tx, mut rx) = unbounded_channel::<String>();
     let writer = tokio::spawn(async move {
@@ -151,11 +170,17 @@ async fn handle(stream: TcpStream, tokens: Arc<Tokens>, events: UnboundedSender<
 
     while let Some(frame) = source.next().await {
         match frame {
-            Ok(Message::Text(text)) => match parse_inbound(text.as_str()) {
-                Inbound::Invalid => log::debug!("invalid plugin message ignored"),
-                Inbound::Unknown => log::debug!("unsupported plugin event ignored"),
-                msg => {
-                    let _ = events.send(ServerEvent::Message { uuid: uuid.clone(), who: who.clone(), msg });
+            Ok(Message::Text(text)) => {
+                let msg = parse_inbound(text.as_str());
+                if log::log_enabled!(target: "plugin_wire", log::Level::Debug) {
+                    log::debug!(target: "plugin_wire", "{}", wire_diagnostic(&who, text.as_str(), &msg));
+                }
+                match msg {
+                    Inbound::Invalid => log::debug!("invalid plugin message ignored"),
+                    Inbound::Unknown => log::debug!("unsupported plugin event ignored"),
+                    msg => {
+                        let _ = events.send(ServerEvent::Message { uuid: uuid.clone(), who: who.clone(), msg });
+                    }
                 }
             },
             Ok(Message::Close(_)) | Err(_) => break,
@@ -174,6 +199,14 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::Message;
+
+    #[test]
+    fn diagnostics_include_only_event_name_and_plugin_identity() {
+        let text = r#"{"event":"customEvent","uuid":"secret-token","payload":{"password":"secret"}}"#;
+        let value = wire_diagnostic(&Registrant::Plugin("test".into()), text, &Inbound::Unknown);
+        assert_eq!(value, serde_json::json!({"plugin":"test","kind":"inbound","event":"customEvent","classification":"unknown"}));
+        assert!(!value.to_string().contains("secret"));
+    }
 
     async fn setup(timeout_ms: u64) -> (Server, Arc<Tokens>, tokio::sync::mpsc::UnboundedReceiver<ServerEvent>) {
         let tokens = Arc::new(Tokens::default());

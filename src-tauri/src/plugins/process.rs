@@ -583,38 +583,41 @@ fn supervise(
         let mut registered = false;
         let mut running_since = None;
         match spawn(&plugin, runtime, port, &uuid, &info, &logs, &node) {
-            Ok(mut child) => loop {
-                match rx.recv_timeout(options.poll_interval.max(Duration::from_millis(1))) {
-                    Ok(Control::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        drop(child);
-                        set_status(&state, PluginStatus::Disabled);
-                        return;
-                    }
-                    Ok(Control::Registered) => {
-                        if !registered {
-                            running_since = Some(Instant::now());
+            Ok(mut child) => {
+                log::debug!(target: "plugin_process", "{}", serde_json::json!({"plugin":plugin.id,"kind":"launched","pid":child.id()}));
+                loop {
+                    match rx.recv_timeout(options.poll_interval.max(Duration::from_millis(1))) {
+                        Ok(Control::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            drop(child);
+                            set_status(&state, PluginStatus::Disabled);
+                            return;
                         }
-                        registered = true;
-                        set_status(&state, PluginStatus::Running);
+                        Ok(Control::Registered) => {
+                            if !registered {
+                                running_since = Some(Instant::now());
+                            }
+                            registered = true;
+                            set_status(&state, PluginStatus::Running);
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
                     }
-                    Err(mpsc::RecvTimeoutError::Timeout) => {}
-                }
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        log::warn!("Plugin {} skončil: {status}", plugin.id);
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            log::warn!("Plugin {} skončil: {status}", plugin.id);
+                            break;
+                        }
+                        Err(error) => {
+                            log::warn!("Plugin {}: {error}", plugin.id);
+                            break;
+                        }
+                        Ok(None) => {}
+                    }
+                    if !registered && launch.elapsed() >= options.registration_timeout {
+                        log::warn!("Plugin {} se nepřipojil včas", plugin.id);
                         break;
                     }
-                    Err(error) => {
-                        log::warn!("Plugin {}: {error}", plugin.id);
-                        break;
-                    }
-                    Ok(None) => {}
                 }
-                if !registered && launch.elapsed() >= options.registration_timeout {
-                    log::warn!("Plugin {} se nepřipojil včas", plugin.id);
-                    break;
-                }
-            },
+            }
             Err(error) => {
                 log::warn!("Plugin {} nelze spustit: {error}", plugin.id);
             }
