@@ -1,0 +1,58 @@
+﻿gerzyDECK — LICENČNÍ PODMÍNKY A UPOZORNĚNÍ
+==========================================
+
+Instalací nebo používáním tohoto softwaru vyjadřujete souhlas s následujícími podmínkami.
+Pokud nesouhlasíte, software neinstalujte.
+
+1. NEOFICIÁLNÍ SOFTWARE
+gerzyDECK je neoficiální software. Není vytvořen, schválen ani podporován společnostmi
+Fifine, Mirabox, Elgato/Corsair, Anthropic, OpenAI, Discord, Spotify ani žádným jiným výrobcem
+či poskytovatelem služeb. Všechny ochranné známky a názvy patří jejich vlastníkům.
+
+2. BEZ ZÁRUKY
+Software je poskytován „TAK, JAK JE“, bez jakékoli záruky, výslovné ani předpokládané,
+včetně záruky prodejnosti, vhodnosti pro určitý účel a neporušení práv třetích stran.
+
+3. POUŽITÍ NA VLASTNÍ NEBEZPEČÍ
+Software komunikuje přímo s hardwarem a do zařízení zapisuje data, mimo jiné do jeho
+trvalé paměti (boot logo). Používáte ho výhradně na vlastní nebezpečí. Autor neručí za
+poškození, nefunkčnost nebo zničení zařízení (včetně Fifine AmpliGame D6), za ztrátu dat,
+za ztrátu záruky výrobce ani za jakoukoli jinou přímou či nepřímou škodu, která vznikne
+používáním nebo nemožností používání softwaru.
+
+4. SLUŽBY TŘETÍCH STRAN
+Funkce „Využití AI“ používá neveřejná rozhraní služeb Anthropic a OpenAI s přihlášením
+z aplikací Claude Code a Codex a může tyto přihlašovací údaje obnovovat. Rozhraní se mohou
+kdykoli změnit. Odpovídáte za to, že používání je v souladu s podmínkami těchto služeb.
+Katalogy pluginů a ikon jsou služby třetích stran.
+
+5. PLUGINY
+Pluginy jsou programy třetích stran, které běží na vašem počítači s vašimi oprávněními.
+Autor za ně neodpovídá. Instalujte jen pluginy, kterým důvěřujete.
+
+6. HRY A PRAVIDLA
+Simulování kláves a maker může porušovat pravidla některých her nebo spouštět anticheat.
+Za případné sankce (např. zablokování herního účtu) autor neodpovídá.
+
+7. OMEZENÍ ODPOVĚDNOSTI
+V maximálním rozsahu povoleném právními předpisy autor neodpovídá za žádné škody
+jakéhokoli druhu vzniklé v souvislosti se softwarem, a to ani v případě, že byl na možnost
+takové škody upozorněn.
+
+8. KOMPONENTY TŘETÍCH STRAN
+Software obsahuje open-source komponenty, které se řídí svými licencemi (např. Tauri,
+Rust knihovny, protokol podle projektu fifine-ampligame-d6 pod licencí MIT).
+
+
+------------------------------------------------------------------------------------------
+gerzyDECK — LICENSE TERMS AND DISCLAIMER (English summary)
+
+By installing or using this software you agree to the terms above. In short: gerzyDECK is
+unofficial and not affiliated with Fifine, Mirabox, Elgato/Corsair, Anthropic, OpenAI or any
+other vendor. It is provided "AS IS" without warranty of any kind. It writes data to your
+device, including its persistent memory (boot logo); you use it entirely at your own risk.
+The author is not liable for any damage to your device, loss of data, loss of warranty,
+game account sanctions, third-party plugins or services, or any other direct or indirect
+damages arising from the use of, or inability to use, this software.
+
+© 2026 gerzyDECK
