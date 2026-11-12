@@ -186,6 +186,10 @@ fn main() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                // a calibration must never outlive the editor window (deck keys would stay dead)
+                if let Some(tx) = window.try_state::<EngineTx>() {
+                    let _ = tx.0.send(Msg::SetCalibrating(false));
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

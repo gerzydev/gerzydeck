@@ -54,29 +54,47 @@ impl Store {
         Self::write_atomic(&self.config_file(), &json)
     }
 
-    /// Never fails: missing → default (saved), corrupt → backed up + default.
+    /// Never fails: missing → default (saved). Anything unreadable or unusable is first copied
+    /// to `config.broken-<ms>.json`, so the user's profiles are never silently overwritten.
     pub fn load(&self) -> Config {
         let path = self.config_file();
-        let text = match std::fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(_) => {
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let cfg = create_default_config();
                 if let Err(e) = self.save(&cfg) {
                     log::error!("saving default config failed: {e}");
                 }
                 return cfg;
             }
+            Err(e) => return self.recover(&format!("cannot read config.json: {e}")),
         };
-        match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(v) => normalize_config(&v),
-            Err(e) => {
-                let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-                let backup = self.dir.join(format!("config.broken-{ms}.json"));
-                log::error!("config.json is corrupt ({e}), moved to {}", backup.display());
-                let _ = std::fs::rename(&path, backup);
+        let value = match std::str::from_utf8(&bytes).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<serde_json::Value>(t).map_err(|e| e.to_string())) {
+            Ok(v) => v,
+            Err(e) => return self.recover(&format!("config.json is corrupt: {e}")),
+        };
+        if !value.get("profiles").is_some_and(|p| p.as_array().is_some_and(|a| !a.is_empty())) {
+            return self.recover("config.json has no profiles");
+        }
+        normalize_config(&value)
+    }
+
+    fn recover(&self, why: &str) -> Config {
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let backup = self.dir.join(format!("config.broken-{ms}.json"));
+        match std::fs::copy(self.config_file(), &backup) {
+            Ok(_) => {
+                log::error!("{why}; backed up to {}", backup.display());
                 let cfg = create_default_config();
-                let _ = self.save(&cfg);
+                if let Err(e) = self.save(&cfg) {
+                    log::error!("saving default config failed: {e}");
+                }
                 cfg
+            }
+            Err(e) => {
+                // cannot even back it up: use defaults in memory, leave the file alone
+                log::error!("{why}; backup failed ({e}), not touching config.json");
+                create_default_config()
             }
         }
     }
@@ -149,6 +167,29 @@ mod tests {
         assert_eq!(c.profiles.len(), 1);
         let names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert!(names.iter().any(|n| n.starts_with("config.broken-") && n.ends_with(".json")), "{names:?}");
+    }
+
+    fn has_backup(dir: &std::path::Path) -> bool {
+        std::fs::read_dir(dir).unwrap().any(|e| {
+            let n = e.unwrap().file_name().to_string_lossy().into_owned();
+            n.starts_with("config.broken-") && n.ends_with(".json")
+        })
+    }
+
+    #[test]
+    fn non_utf8_config_is_backed_up_not_silently_replaced() {
+        let dir = tmp();
+        std::fs::write(dir.join("config.json"), [0x7B, 0xFF, 0xFE, 0x7D]).unwrap();
+        let _ = Store::new(dir.clone()).load();
+        assert!(has_backup(&dir));
+    }
+
+    #[test]
+    fn json_without_profiles_is_backed_up() {
+        let dir = tmp();
+        std::fs::write(dir.join("config.json"), r#"{"hello": 1}"#).unwrap();
+        let _ = Store::new(dir.clone()).load();
+        assert!(has_backup(&dir));
     }
 
     #[test]

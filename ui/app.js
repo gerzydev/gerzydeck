@@ -475,9 +475,9 @@ function renderSettings() {
   $('page-settings').replaceChildren(h('div', { class: 'rm-stack' }, parts));
 }
 
-function startCalibration() {
+async function startCalibration() {
+  try { await invoke('set_calibrating', { on: true }); } catch (e) { toast(e); return; }
   calibration = { step: 1, map: new Array(15).fill(0), used: new Set() };
-  invoke('set_calibrating', { on: true }).catch(toast);
   renderSettings();
 }
 
@@ -515,6 +515,12 @@ function onRaw({ deviceId, pressed }) {
 function onState(s) {
   const profileChanged = s.activeProfileId !== state.activeProfileId;
   state = s;
+  // the core cancelled calibration (window closed) → drop the half-done wizard, save nothing
+  // (only after the core confirmed it started, so an older in-flight state event cannot cancel it)
+  if (calibration) {
+    if (s.calibrating) calibration.confirmed = true;
+    else if (calibration.confirmed) { calibration = null; if (page === 'settings') renderSettings(); }
+  }
   if (config && s.activeProfileId) config.activeProfileId = config.profiles.some((p) => p.id === s.activeProfileId) ? s.activeProfileId : config.activeProfileId;
   renderSidebar();
   renderBanners();
@@ -555,6 +561,8 @@ async function boot() {
     $('page-deck').replaceChildren(h('div', { class: 'rm-note is-warn' }, `Nepodařilo se spojit s jádrem programu: ${e}`));
     return;
   }
+  // a reload must not leave the core stuck in calibration mode
+  invoke('set_calibrating', { on: false }).catch(() => {});
   invoke('get_autostart').then((v) => { autostart = v; if (page === 'settings') renderSettings(); }).catch(() => {});
   renderSidebar();
   renderBanners();

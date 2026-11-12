@@ -159,7 +159,12 @@ pub fn normalize_action(v: &Value) -> Action {
                 if arr.is_empty() || arr.len() > 200 {
                     return None;
                 }
-                Action::Macro { steps: arr.iter().map(normalize_step).collect::<Option<Vec<_>>>()? }
+                // drop invalid steps one by one (e.g. an empty text step while the user is typing)
+                let steps: Vec<Step> = arr.iter().filter_map(normalize_step).collect();
+                if steps.is_empty() {
+                    return None;
+                }
+                Action::Macro { steps }
             }
             "launch" => {
                 let target = s(&v["target"], 1000).trim().to_string();
@@ -353,6 +358,15 @@ mod tests {
         assert_eq!(p.key(9).action, Action::Launch { target: "notepad.exe".into(), args: vec![] });
         assert_eq!(p.key(10).action, Action::None);
         assert_eq!(p.key(11).action, Action::None);
+    }
+
+    /// The editor creates an empty "Napsat text" step while typing; it must not wipe the whole macro.
+    #[test]
+    fn invalid_macro_steps_are_dropped_individually() {
+        let a = normalize_action(&json!({ "type": "macro", "steps": [
+            { "type": "tap", "code": "KeyQ" }, { "type": "text", "text": "" }, { "type": "wait", "ms": 50 }
+        ] }));
+        assert_eq!(a, Action::Macro { steps: vec![Step::Tap { code: "KeyQ".into() }, Step::Wait { ms: 50 }] });
     }
 
     #[test]

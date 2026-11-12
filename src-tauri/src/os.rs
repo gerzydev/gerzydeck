@@ -152,8 +152,10 @@ pub fn run_system(command: &str) {
             }
         }
         "sleep" => {
-            if let Err(e) = std::process::Command::new("rundll32.exe").args(["powrprof.dll,SetSuspendState", "0,1,0"]).spawn() {
-                log::error!("sleep failed: {e}");
+            // Direct call: rundll32 passes garbage BOOLEANs to SetSuspendState and may hibernate.
+            let ok = unsafe { windows::Win32::System::Power::SetSuspendState(false, false, false) };
+            if !ok {
+                log::error!("sleep failed");
             }
         }
         other => log::warn!("unknown system command {other}"),
