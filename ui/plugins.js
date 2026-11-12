@@ -170,6 +170,7 @@ export function pickPluginAction(ui) {
   return new Promise((resolve) => {
     let q = '';
     const close = (v) => { overlay.remove(); resolve(v); };
+    const open = new Set();
     const list = h('div', { class: 'rm-stack', style: 'gap:10px;max-height:60vh;overflow:auto' });
     const draw = () => {
       const qq = q.trim().toLowerCase();
@@ -177,10 +178,19 @@ export function pickPluginAction(ui) {
         p,
         actions: p.actions.filter((a) => !qq || a.name.toLowerCase().includes(qq) || p.name.toLowerCase().includes(qq)),
       })).filter((g) => g.actions.length);
-      list.replaceChildren(...(groups.length ? groups.map(({ p, actions }) => h('div', { class: 'rm-stack', style: 'gap:4px' },
-        h('div', { class: 'plug-h' }, h('img', { class: 'tpl-icon', src: p.icon, alt: '' }), p.name),
-        actions.map((a) => h('button', { class: 'tpl-item', type: 'button', title: a.tooltip || '', onclick: () => close({ plugin: p.id, action: a.uuid }) },
-          h('span', { class: 'tpl-name' }, h('img', { class: 'tpl-icon', src: a.icon, alt: '' }), a.name))))) : [
+      // plugins start collapsed; a search expands every plugin with a match
+      list.replaceChildren(...(groups.length ? groups.map(({ p, actions }) => {
+        const isOpen = Boolean(qq) || open.has(p.id);
+        return h('div', { class: 'rm-stack', style: 'gap:4px' },
+          h('button', { class: `plug-group${isOpen ? ' open' : ''}`, type: 'button', 'aria-expanded': String(isOpen),
+            onclick: () => { if (open.has(p.id)) open.delete(p.id); else open.add(p.id); draw(); } },
+            h('img', { class: 'tpl-icon', src: p.icon, alt: '' }),
+            h('span', { class: 'plug-group-name' }, p.name),
+            h('span', { class: 'rm-meta' }, `${actions.length}`),
+            h('span', { class: 'plug-chev' }, '›')),
+          isOpen && actions.map((a) => h('button', { class: 'tpl-item', type: 'button', title: a.tooltip || '', onclick: () => close({ plugin: p.id, action: a.uuid }) },
+            h('span', { class: 'tpl-name' }, h('img', { class: 'tpl-icon', src: a.icon, alt: '' }), a.name))));
+      }) : [
         h('div', { class: 'rm-meta' }, installedPlugins().length ? 'Nic nenalezeno.' : 'Nemáš nainstalovaný žádný plugin. Najdeš je na stránce Pluginy.')]));
     };
     const search = h('input', { class: 'rm-input', type: 'search', placeholder: 'Hledat akci…', oninput: (e) => { q = e.target.value; draw(); } });
