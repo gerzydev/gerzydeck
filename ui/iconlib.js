@@ -15,7 +15,7 @@ const SETS = [
 const TABS = [['catalog', 'Katalog'], ['library', 'Moje ikony'], ['packs', 'Balíky'], ['builtin', 'Vestavěné']];
 
 // remembered between openings
-const st = { tab: 'catalog', q: '', set: '', color: '#ffffff', bg: '#000000', pack: null };
+const st = { tab: 'catalog', q: '', set: '', color: '#ffffff', bg: '#000000', noBg: false, pack: null };
 
 /** Any image URL (svg/png/…) → 200×200 PNG bytes. Optional bg + scale for catalogue glyphs. */
 async function toPng(url, { bg = null, scale = 1 } = {}) {
@@ -123,10 +123,10 @@ export function iconBrowser(ui, { mode, onPick }) {
         results.replaceChildren(...data.icons.filter((id) => bodies.has(id)).map((id) => {
           const src = catalogSvg(id);
           const name = id.split(':')[1].replace(/-/g, ' ');
-          if (mode === 'pick') return tile(src, id, () => pick(() => toPng(src, { bg: st.bg, scale: 0.62 })));
+          if (mode === 'pick') return tile(src, id, () => pick(() => toPng(src, { bg: st.noBg ? null : st.bg, scale: 0.62 })));
           return tile(src, id, async () => {
             try {
-              await invoke('icons_upload', await toPng(src, { bg: st.bg, scale: 0.62 }), { headers: { 'x-name': b64(name) } });
+              await invoke('icons_upload', await toPng(src, { bg: st.noBg ? null : st.bg, scale: 0.62 }), { headers: { 'x-name': b64(name) } });
               toast(`Uloženo do Mých ikon: ${name}`);
             } catch (e) { toast(e?.message || e); }
           });
@@ -142,7 +142,8 @@ export function iconBrowser(ui, { mode, onPick }) {
     const color = h('input', { class: 'rm-color', type: 'color', value: st.color, title: 'Barva symbolu',
       onchange: (e) => { st.color = e.target.value; run(); } });
     const bg = h('input', { class: 'rm-color', type: 'color', value: st.bg, title: 'Pozadí tlačítka',
-      onchange: (e) => { st.bg = e.target.value; } });
+      disabled: st.noBg, onchange: (e) => { st.bg = e.target.value; } });
+    const noBg = h('input', { type: 'checkbox', checked: st.noBg, onchange: (e) => { st.noBg = e.target.checked; bg.disabled = st.noBg; } });
     setTimeout(run);
     setTimeout(() => search.focus());
     return [
@@ -150,6 +151,7 @@ export function iconBrowser(ui, { mode, onPick }) {
       h('div', { class: 'rm-row ilib-bar' },
         h('label', { class: 'rm-row ilib-opt' }, color, h('span', { class: 'rm-meta' }, 'Symbol')),
         h('label', { class: 'rm-row ilib-opt' }, bg, h('span', { class: 'rm-meta' }, 'Pozadí')),
+        h('label', { class: 'rm-row ilib-opt', title: 'Průhledná ikona: za ní bude barva pozadí tlačítka' }, noBg, h('span', { class: 'rm-meta' }, 'Bez pozadí')),
         h('span', { class: 'rm-meta rm-grow', style: 'text-align:end' }, mode === 'pick' ? 'Klikni na ikonu a dá se na tlačítko.' : 'Kliknutím ikonu uložíš do Mých ikon.')),
       meta, results,
       h('div', { class: 'rm-meta ilib-credit' }, 'Ikony z ', h('a', { href: 'https://iconify.design', target: '_blank' }, 'Iconify'), ' — open-source sady, každá má vlastní licenci.'),
