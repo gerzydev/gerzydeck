@@ -96,6 +96,16 @@ pub enum PluginEvent {
     ShowAlert { context: String },
     SwitchProfile { profile: String },
     Status { plugin: String, status: PluginStatus },
+    /// title style per state from the manifest (index = state)
+    TitleStyle { context: String, styles: Vec<TitleStyle> },
+}
+
+/// Manifest title hints for one action state.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TitleStyle {
+    pub align: Option<String>,
+    pub size: Option<u32>,
+    pub show: Option<bool>,
 }
 
 /// Context string of a key in a profile; stable across restarts so plugins can cache by it.

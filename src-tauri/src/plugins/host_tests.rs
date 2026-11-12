@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 const MANIFEST: &str = r#"{"Name":"Fake","Version":"1.0","Author":"t","Icon":"icon","CodePath":"fake.exe","PropertyInspectorPath":"pi.html",
-  "Actions":[{"UUID":"com.fake.act","Name":"Act","Icon":"icon","States":[{"Image":"icon"},{"Image":"icon2"}]}]}"#;
+  "Actions":[{"UUID":"com.fake.act","Name":"Act","Icon":"icon","States":[{"Image":"icon","TitleAlignment":"middle","FontSize":17},{"Image":"icon2","ShowTitle":false}]}]}"#;
 
 fn plugins_dir() -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("gd-host-{}", crate::config::new_id()));
@@ -272,4 +272,17 @@ fn registration_is_reported_to_the_launcher() {
     let h = start();
     h.wait_event(|e| matches!(e, PluginEvent::Status { status: super::link::PluginStatus::Running, .. }));
     assert_eq!(h.fake.registered.lock().unwrap().as_slice(), ["com.fake".to_string()]);
+}
+
+#[test]
+fn will_appear_sends_the_manifest_title_style() {
+    let h = start();
+    h.tx.send(HostCmd::WillAppear(ctx(json!({})))).unwrap();
+    let ev = h.wait_event(|e| matches!(e, PluginEvent::TitleStyle { .. }));
+    let PluginEvent::TitleStyle { context, styles } = ev else { unreachable!() };
+    assert_eq!(context, "A:3");
+    assert_eq!(styles.len(), 2);
+    assert_eq!(styles[0].align.as_deref(), Some("middle"));
+    assert_eq!(styles[0].size, Some(17));
+    assert_eq!(styles[1].show, Some(false));
 }

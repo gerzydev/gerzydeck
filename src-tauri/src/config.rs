@@ -37,11 +37,14 @@ pub struct KeyConfig {
     pub label: String,
     pub bg: String,
     pub action: Action,
+    /// plugin keys: where the live value goes ("top" | "middle" | "bottom"); None = as the plugin says
+    #[serde(default)]
+    pub title_align: Option<String>,
 }
 
 impl Default for KeyConfig {
     fn default() -> Self {
-        Self { image: None, label: String::new(), bg: DEFAULT_BG.into(), action: Action::None }
+        Self { image: None, label: String::new(), bg: DEFAULT_BG.into(), action: Action::None, title_align: None }
     }
 }
 
@@ -225,6 +228,7 @@ fn normalize_key(v: &Value) -> KeyConfig {
         label: s(&v["label"], 40),
         bg: bg.map(|b| b.to_ascii_lowercase()).unwrap_or_else(|| DEFAULT_BG.into()),
         action: normalize_action(&v["action"]),
+        title_align: v["titleAlign"].as_str().filter(|a| matches!(*a, "top" | "middle" | "bottom")).map(String::from),
     }
 }
 
@@ -394,6 +398,17 @@ mod tests {
         let v = serde_json::to_value(&ok).unwrap();
         assert_eq!(v["type"], "plugin");
         assert_eq!(v["settings"]["a"], 1);
+    }
+
+    #[test]
+    fn title_align_is_optional_and_validated() {
+        let c = normalize_config(&json!({ "profiles": [profile("a", json!({ "keys": {
+            "1": { "titleAlign": "middle" }, "2": { "titleAlign": "sideways" }, "3": {}
+        } }))] }));
+        assert_eq!(c.profiles[0].key(1).title_align.as_deref(), Some("middle"));
+        assert_eq!(c.profiles[0].key(2).title_align, None);
+        assert_eq!(c.profiles[0].key(3).title_align, None);
+        assert_eq!(serde_json::to_value(c.profiles[0].key(1)).unwrap()["titleAlign"], "middle");
     }
 
     #[test]

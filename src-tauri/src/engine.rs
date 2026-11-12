@@ -65,11 +65,17 @@ pub struct PluginTile {
     pub overlay: Overlay,
     /// plugin not installed: draw the label with a warning marker
     pub missing: bool,
+    /// where the live title goes: editor choice, else manifest hint ("top" | "middle" | "bottom")
+    pub align: Option<String>,
+    /// manifest font size (SDK points)
+    pub size: Option<u32>,
+    pub show_title: bool,
 }
 
 /// Latest images/titles a plugin set for one action instance (None key = all states).
 #[derive(Default)]
 struct PluginView {
+    styles: Vec<crate::plugins::link::TitleStyle>,
     images: HashMap<Option<u8>, Arc<RgbaImage>>,
     titles: HashMap<Option<u8>, String>,
     overlay: Option<(Overlay, Instant)>,
@@ -324,13 +330,14 @@ impl Engine {
                 .unwrap_or_default();
             let sig = match &plugin {
                 Some((p, state)) => format!(
-                    "P|{}|{}|{}|{}|{:?}|{}",
+                    "P|{}|{}|{}|{}|{:?}|{}|{:?}",
                     self.views.get(&context).map_or(0, |v| v.gen),
                     state,
                     cfg.label,
                     cfg.bg,
                     overlay,
-                    self.missing_plugins.contains(p)
+                    self.missing_plugins.contains(p),
+                    cfg.title_align
                 ),
                 None => format!("{:?}|{}|{}", cfg.image, cfg.label, cfg.bg),
             };
@@ -344,7 +351,11 @@ impl Engine {
                         continue;
                     }
                     let view = self.views.get(&context);
+                    let style = view.and_then(|v| v.styles.get(*state as usize).or_else(|| v.styles.first())).cloned().unwrap_or_default();
                     let tile = PluginTile {
+                        align: cfg.title_align.clone().or(style.align),
+                        size: style.size,
+                        show_title: style.show.unwrap_or(true),
                         image: view.and_then(|v| PluginView::pick(&v.images, *state)),
                         title: view.and_then(|v| PluginView::pick(&v.titles, *state)),
                         label: (!cfg.label.is_empty()).then(|| cfg.label.clone()),
@@ -438,6 +449,12 @@ impl Engine {
                         kc.ctx.settings = settings;
                     }
                     self.save_config();
+                }
+            }
+            PluginEvent::TitleStyle { context, styles } => {
+                if let Some(v) = self.touch_view(&context) {
+                    v.styles = styles;
+                    self.render_active();
                 }
             }
             PluginEvent::ShowOk { context } => self.overlay(&context, Overlay::Ok),

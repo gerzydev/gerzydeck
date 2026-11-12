@@ -35,7 +35,8 @@ fn render(spec: &KeySpec) -> Vec<u8> {
     format!("{}|{}", spec.label, spec.image.is_some()).into_bytes()
 }
 fn render_plugin(tile: &PluginTile) -> Vec<u8> {
-    format!("P|{:?}|{:?}|{:?}|{}|{}", tile.label, tile.title, tile.overlay, tile.image.is_some(), tile.missing).into_bytes()
+    let style = if tile.align.is_some() || tile.size.is_some() { format!("|{:?}|{:?}|{}", tile.align, tile.size, tile.show_title) } else { String::new() };
+    format!("P|{:?}|{:?}|{:?}|{}|{}{style}", tile.label, tile.title, tile.overlay, tile.image.is_some(), tile.missing).into_bytes()
 }
 
 fn cfg() -> Config {
@@ -265,4 +266,27 @@ fn user_label_and_live_plugin_title_are_both_rendered() {
     std::thread::sleep(Duration::from_millis(150));
     let last = p.images().into_iter().filter(|(k, _)| *k == 3).last().map(|(_, s)| s);
     assert_eq!(last.as_deref(), Some(r#"P|Some("CPU")|Some("8%")|None|false|false"#));
+}
+
+#[test]
+fn manifest_title_style_applies_and_editor_alignment_wins() {
+    use crate::plugins::link::TitleStyle;
+    let p = P::new();
+    p.connect();
+    p.images();
+    std::thread::sleep(Duration::from_millis(120));
+    p.plugin(PluginEvent::TitleStyle { context: "A:3".into(), styles: vec![TitleStyle { align: Some("middle".into()), size: Some(17), show: None }] });
+    std::thread::sleep(Duration::from_millis(150));
+    let last = p.images().into_iter().filter(|(k, _)| *k == 3).last().map(|(_, s)| s).unwrap();
+    assert!(last.ends_with(r#"|Some("middle")|Some(17)|true"#), "{last}");
+    let (r, rx) = channel();
+    p.tx.send(Msg::GetConfig(r)).unwrap();
+    let mut c = rx.recv().unwrap();
+    c.profiles[0].keys.get_mut("3").unwrap().title_align = Some("top".into());
+    let (r, rx) = channel();
+    p.tx.send(Msg::SetConfig(serde_json::to_value(&c).unwrap(), r)).unwrap();
+    rx.recv().unwrap().unwrap();
+    std::thread::sleep(Duration::from_millis(150));
+    let last = p.images().into_iter().filter(|(k, _)| *k == 3).last().map(|(_, s)| s).unwrap();
+    assert!(last.ends_with(r#"|Some("top")|Some(17)|true"#), "{last}");
 }

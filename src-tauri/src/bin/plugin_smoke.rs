@@ -283,6 +283,7 @@ fn event_name(event: &PluginEvent) -> &'static str {
         PluginEvent::ShowAlert { .. } => "ShowAlert",
         PluginEvent::SwitchProfile { .. } => "SwitchProfile",
         PluginEvent::Status { .. } => "Status",
+        PluginEvent::TitleStyle { .. } => "TitleStyle (manifest)",
     }
 }
 

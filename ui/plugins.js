@@ -220,6 +220,11 @@ export function pluginActionFields(ui, profileId, key, cfg, onChange) {
     } }, 'Změnit'));
   if (!plugin) return [head, h('div', { class: 'rm-note is-warn' }, 'Plugin chybí. Nainstaluj ho znovu na stránce Pluginy a akce i nastavení se vrátí.')];
 
+  const alignRow = h('label', { class: 'rm-field' },
+    h('span', { class: 'rm-label' }, 'Pozice hodnoty na tlačítku'),
+    h('select', { class: 'rm-select', onchange: (e) => { cfg.titleAlign = e.target.value || null; onChange(false); } },
+      [['', 'Podle pluginu'], ['top', 'Nahoře'], ['middle', 'Uprostřed'], ['bottom', 'Dole']]
+        .map(([v, l]) => h('option', { value: v, selected: (cfg.titleAlign ?? '') === v }, l))));
   const frame = h('iframe', { class: 'pi-frame', title: 'Nastavení akce pluginu' });
   const note = h('div', { class: 'rm-meta' }, 'Načítám nastavení pluginu…');
   closePi(ui);
@@ -229,7 +234,7 @@ export function pluginActionFields(ui, profileId, key, cfg, onChange) {
     frame.src = pi.url;
     frame.onload = () => note.remove();
   }).catch((e) => { note.textContent = String(e); frame.remove(); });
-  return [head, note, frame];
+  return [head, alignRow, note, frame];
 }
 
 // property inspectors report their height via postMessage (bootstrap injected by the scheme handler)

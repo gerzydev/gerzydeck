@@ -229,6 +229,23 @@ impl Host {
         (self.deps.decode_image)(&rel, Some(&p.loaded.dir))
     }
 
+    /// Title hints (alignment, size, visibility) of every state of an action, from the manifest.
+    fn title_styles(&self, kc: &KeyCtx) -> Option<Vec<super::link::TitleStyle>> {
+        let p = self.plugins.get(&kc.plugin)?;
+        let action = p.loaded.manifest.actions.iter().find(|a| a.uuid == kc.ctx.action)?;
+        Some(
+            action
+                .states
+                .iter()
+                .map(|st| super::link::TitleStyle {
+                    align: st.title_alignment.as_ref().map(|a| a.to_ascii_lowercase()).filter(|a| matches!(a.as_str(), "top" | "middle" | "bottom")),
+                    size: st.font_size,
+                    show: st.show_title,
+                })
+                .collect(),
+        )
+    }
+
     fn owns(&self, plugin: &str, context: &str) -> bool {
         self.instances.get(context).is_some_and(|k| k.plugin == plugin)
     }
@@ -258,6 +275,9 @@ impl Host {
                 }
                 if let Some(img) = self.default_image(&kc) {
                     self.emit(PluginEvent::SetImage { context: kc.ctx.context.clone(), image: Some(Arc::new(img)), state: None });
+                }
+                if let Some(styles) = self.title_styles(&kc) {
+                    self.emit(PluginEvent::TitleStyle { context: kc.ctx.context.clone(), styles });
                 }
                 self.to_plugin(&kc.plugin, protocol::appear_event("willAppear", &kc.ctx));
                 self.instances.insert(kc.ctx.context.clone(), kc);
