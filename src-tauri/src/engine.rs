@@ -37,6 +37,8 @@ pub struct State {
     pub foreground_elevated: bool,
     pub conflicts: Vec<String>,
     pub calibrating: bool,
+    /// AI usage per provider, for the editor's key previews
+    pub usage: std::collections::BTreeMap<String, crate::usage::UsageView>,
 }
 
 /// Device id reported to plugins.
@@ -741,7 +743,13 @@ impl Engine {
                 // keep showing the last numbers when a refresh fails for network reasons
                 let keep = matches!((&result, self.usage.get(&provider)), (Err(e), Some(Ok(_))) if e.contains("internet") || e.contains("dotaz"));
                 if !keep {
+                    let view = match &result {
+                        Ok(u) => crate::usage::UsageView { usage: u.clone(), error: None },
+                        Err(e) => crate::usage::UsageView { usage: Default::default(), error: Some(e.clone()) },
+                    };
+                    self.state.usage.insert(provider.clone(), view);
                     self.usage.insert(provider, result);
+                    self.sink.state(&self.state);
                 }
                 self.render_active();
             }

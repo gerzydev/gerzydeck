@@ -18,18 +18,27 @@ const REFRESH_MARGIN_S: i64 = 5 * 60;
 
 pub const PROVIDERS: [&str; 2] = ["claude", "codex"];
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Window {
     pub percent: f32,
     /// unix seconds
     pub resets_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct Usage {
     /// the 5-hour window
     pub session: Option<Window>,
     pub weekly: Option<Window>,
+}
+
+/// What the editor gets for its key previews.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
+pub struct UsageView {
+    #[serde(flatten)]
+    pub usage: Usage,
+    pub error: Option<String>,
 }
 
 pub fn now_s() -> i64 {

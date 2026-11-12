@@ -139,11 +139,44 @@ function fillTile(btn, cfg, k) {
     btn.append(img);
     if (cfg.label) btn.append(h('span', { class: 'shade' }));
   }
+  if (cfg.action?.type === 'usage') {
+    btn.append(usagePreview(cfg));
+    btn.append(h('span', { class: 'num' }, k));
+    return;
+  }
   const pa = cfg.action?.type === 'plugin' && !cfg.image ? pluginAction(cfg.action.plugin, cfg.action.action) : null;
   if (pa?.action?.icon) btn.append(h('img', { class: 'act-icon', src: pa.action.icon, alt: '' }));
   if (pa && !pa.plugin) btn.append(h('span', { class: 'lbl center' }, '⚠'));
   if (cfg.label) btn.append(h('span', { class: `lbl ${cfg.image || pa?.action?.icon ? 'bottom' : 'center'}` }, cfg.label));
   btn.append(h('span', { class: 'num' }, k));
+}
+
+function resetText(at) {
+  const s = Math.round(at - Date.now() / 1000);
+  if (s <= 0) return 'teď';
+  if (s < 60) return '<1 min';
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}`;
+  return `${Math.floor(s / 86400)} d ${Math.floor(s % 86400 / 3600)} h`;
+}
+
+/** Same layout as the key on the deck: name, percentage, bar, reset countdown. */
+function usagePreview(cfg) {
+  const a = cfg.action;
+  const name = cfg.label || `${a.provider === 'claude' ? 'Claude' : 'GPT'} ${a.window === 'weekly' ? 'týden' : '5h'}`;
+  const u = state.usage?.[a.provider];
+  const w = u && (a.window === 'weekly' ? u.weekly : u.session);
+  const box = h('span', { class: 'usage-prev' }, h('span', { class: 'u-name' }, name));
+  if (u?.error) box.append(h('span', { class: 'u-err' }, '!'), h('span', { class: 'u-msg' }, u.error));
+  else if (!w) box.append(h('span', { class: 'u-pct' }, '…'));
+  else {
+    const color = w.percent >= 90 ? '#ff5a5a' : w.percent >= 70 ? '#f2b84b' : '#46e06c';
+    box.append(
+      h('span', { class: 'u-pct', style: `color:${color}` }, `${Math.round(w.percent)} %`),
+      h('span', { class: 'u-bar' }, h('span', { style: `width:${Math.min(100, Math.max(0, w.percent))}%;background:${color}` })),
+      h('span', { class: 'u-reset' }, `za ${resetText(w.resetsAt)}`));
+  }
+  return box;
 }
 
 function refreshTile(k) {
@@ -640,6 +673,9 @@ function onState(s) {
   renderSidebar();
   renderBanners();
   if (!config) return;
+  if (page === 'deck') {
+    for (let k = 1; k <= 15; k++) if (keyCfg(k).action?.type === 'usage') refreshTile(k);
+  }
   renderProfileSelect();
   if (profileChanged && page !== 'settings') renderPage();
 }
