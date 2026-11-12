@@ -1,0 +1,162 @@
+{
+	"Name": "Discord",
+	"Author": "nekename",
+	"Version": "0.5.1",
+	"Category": "Discord",
+	"Icon": "icon",
+	"OS": [{ "Platform": "windows" }, { "Platform": "mac" }, { "Platform": "linux" }],
+	"CodePaths": {
+		"x86_64-pc-windows-msvc": "oadiscord-x86_64-pc-windows-msvc.exe",
+		"x86_64-apple-darwin": "oadiscord-x86_64-apple-darwin",
+		"aarch64-apple-darwin": "oadiscord-aarch64-apple-darwin",
+		"x86_64-unknown-linux-gnu": "oadiscord-x86_64-unknown-linux-gnu",
+		"aarch64-unknown-linux-gnu": "oadiscord-aarch64-unknown-linux-gnu"
+	},
+	"CodePathWin": "oadiscord-x86_64-pc-windows-msvc.exe",
+	"CodePathMac": "oadiscord-x86_64-apple-darwin",
+	"CodePathLin": "oadiscord-x86_64-unknown-linux-gnu",
+	"Actions": [
+		{
+			"UUID": "me.amankhanna.oadiscord.togglemute",
+			"Name": "Toggle Mute",
+			"Icon": "actions/mute_0",
+			"Tooltip": "Mute and unmute yourself",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/simple.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/mute_0" }, { "Image": "actions/mute_1" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.toggledeafen",
+			"Name": "Toggle Deafen",
+			"Icon": "actions/deafen_0",
+			"Tooltip": "Deafen and undeafen yourself",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/simple.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/deafen_0" }, { "Image": "actions/deafen_1" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.pushtomute",
+			"Name": "Push to Mute",
+			"Icon": "actions/pushtomute_0",
+			"Tooltip": "Mute and unmute yourself by holding down a key",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/simple.html",
+			"DisableAutomaticStates": true,
+			"SupportedInMultiActions": false,
+			"States": [{ "Image": "actions/pushtomute_0" }, { "Image": "actions/pushtomute_1" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.pushtotalk",
+			"Name": "Push to Talk",
+			"Icon": "actions/pushtotalk_0",
+			"Tooltip": "Unmute and mute yourself by holding down a key",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/simple.html",
+			"DisableAutomaticStates": true,
+			"SupportedInMultiActions": false,
+			"States": [{ "Image": "actions/pushtotalk_0" }, { "Image": "actions/pushtotalk_1" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.togglevoiceinputmode",
+			"Name": "Toggle Voice Input Mode",
+			"Icon": "actions/ptttoggle_0",
+			"Tooltip": "Switch between the Push to Talk and Voice Activity voice input modes",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/simple.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/ptttoggle_0" }, { "Image": "actions/ptttoggle_1" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.togglevideo",
+			"Name": "Toggle Video",
+			"Icon": "actions/video_0",
+			"Tooltip": "Start or stop streaming video in the current voice call",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/simple.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/video_0" }, { "Image": "actions/video_1" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.togglescreenshare",
+			"Name": "Toggle Screen Share",
+			"Icon": "actions/stream_0",
+			"Tooltip": "Start or stop screen sharing in the current voice call",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/simple.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/stream_0" }, { "Image": "actions/stream_1" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.volumecontrol",
+			"Name": "Volume Control",
+			"Icon": "actions/volumeControl",
+			"Tooltip": "Control the volume levels of audio input and output devices",
+			"Controllers": ["Keypad", "Encoder"],
+			"PropertyInspectorPath": "pi/volumecontrol.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/volumeControl" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.uservolumecontrol",
+			"Name": "User Volume Control",
+			"Icon": "actions/userVolumeControl",
+			"Tooltip": "Control the output volume level of another user",
+			"Controllers": ["Keypad", "Encoder"],
+			"PropertyInspectorPath": "pi/uservolumecontrol.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/userVolumeControl" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.setaudiodevice",
+			"Name": "Set Audio Device",
+			"Icon": "actions/headphonesAndMicrophone",
+			"Tooltip": "Set the audio input and output devices used in voice calls",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/setaudiodevice.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/headphonesAndMicrophone" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.textchannel",
+			"Name": "Text Channel",
+			"Icon": "actions/textchannel",
+			"Tooltip": "Jump to a specific text channel",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/selectchannel.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/textchannel" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.voicechannel",
+			"Name": "Voice Channel",
+			"Icon": "actions/voicechannel_0",
+			"Tooltip": "Join or leave a specific voice channel",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/selectchannel.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/voicechannel_0" }, { "Image": "actions/voicechannel_1" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.soundboard",
+			"Name": "Soundboard",
+			"Icon": "actions/soundboard",
+			"Tooltip": "Play a sound from the soundboard in the current voice call",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/soundboard.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/soundboard" }]
+		},
+		{
+			"UUID": "me.amankhanna.oadiscord.notifications",
+			"Name": "Notifications",
+			"Icon": "actions/notifications",
+			"Tooltip": "Receive notifications and surface them in the Discord app",
+			"Controllers": ["Keypad"],
+			"PropertyInspectorPath": "pi/notifications.html",
+			"DisableAutomaticStates": true,
+			"States": [{ "Image": "actions/notifications" }]
+		}
+	]
+}
