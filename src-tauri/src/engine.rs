@@ -104,6 +104,8 @@ impl PluginView {
 pub enum Msg {
     Device(DeviceEvent),
     Plugin(PluginEvent),
+    /// drag & drop in the editor: swap two keys of a profile (content, action, plugin settings)
+    SwapKeys { profile_id: String, a: u8, b: u8, reply: Sender<Result<Config, String>> },
     /// property inspector for a key: forwarded to the host with the key's current action instance
     OpenPi { profile_id: String, key: u8, reply: Sender<Option<crate::plugins::link::PiInfo>> },
     /// periodic wake-up for throttled frames and overlay expiry
@@ -560,6 +562,33 @@ impl Engine {
         Ok(self.config.clone())
     }
 
+    fn swap_keys(&mut self, profile_id: &str, a: u8, b: u8) -> Result<Config, String> {
+        if a == b || !(1..=15).contains(&a) || !(1..=15).contains(&b) {
+            return Err("Neplatné tlačítko".into());
+        }
+        let profile = self.config.profiles.iter_mut().find(|p| p.id == profile_id).ok_or("Profil neexistuje")?;
+        let ka = profile.keys.remove(&a.to_string()).unwrap_or_default();
+        let kb = profile.keys.remove(&b.to_string()).unwrap_or_default();
+        profile.keys.insert(a.to_string(), kb);
+        profile.keys.insert(b.to_string(), ka);
+        // live plugin images/titles move with their keys
+        let (ca, cb) = (context_for(profile_id, a), context_for(profile_id, b));
+        let va = self.views.remove(&ca);
+        let vb = self.views.remove(&cb);
+        if let Some(v) = va {
+            self.views.insert(cb.clone(), v);
+        }
+        if let Some(v) = vb {
+            self.views.insert(ca.clone(), v);
+        }
+        for k in [a, b] {
+            self.rendered.remove(&k);
+            self.last_frame.remove(&k);
+        }
+        self.store.save(&self.config).map_err(|e| format!("Uložení selhalo: {e}"))?;
+        Ok(self.config.clone())
+    }
+
     /// Notifications and rendering after a config change. Runs after the caller got its reply,
     /// because sinks may block (Tauri tray calls wait for the main thread).
     fn after_config_change(&mut self) {
@@ -598,6 +627,14 @@ impl Engine {
             Msg::Device(DeviceEvent::Raw { device_id, pressed }) => self.sink.raw(device_id, pressed),
             Msg::Device(DeviceEvent::Key { key, pressed }) => self.on_key(key, pressed),
             Msg::Plugin(ev) => self.on_plugin(ev),
+            Msg::SwapKeys { profile_id, a, b, reply } => {
+                let res = self.swap_keys(&profile_id, a, b);
+                let ok = res.is_ok();
+                let _ = reply.send(res);
+                if ok {
+                    self.after_config_change();
+                }
+            }
             Msg::OpenPi { profile_id, key, reply } => {
                 let kc = self.config.profiles.iter().find(|p| p.id == profile_id).and_then(|p| Self::key_ctx(&p.id, key, &p.key(key).action));
                 match (kc, &self.host_tx) {

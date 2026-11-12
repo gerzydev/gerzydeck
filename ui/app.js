@@ -189,7 +189,26 @@ function renderPage() {
 function renderDeck() {
   const grid = h('div', { class: 'deck-grid' });
   for (let k = 1; k <= 15; k++) {
-    grid.append(keyTile(k, { onclick: () => { if (k !== selectedKey) closePi(ui); selectedKey = k; showTemplates = false; showIcons = false; renderDeck(); } }));
+    grid.append(keyTile(k, {
+      draggable: true,
+      onclick: () => { if (k !== selectedKey) closePi(ui); selectedKey = k; showTemplates = false; showIcons = false; renderDeck(); },
+      ondragstart: (e) => { e.dataTransfer.setData('text/x-deck-key', String(k)); e.dataTransfer.effectAllowed = 'move'; },
+      ondragover: (e) => { if (e.dataTransfer.types.includes('text/x-deck-key')) { e.preventDefault(); e.currentTarget.classList.add('drop-target'); } },
+      ondragleave: (e) => e.currentTarget.classList.remove('drop-target'),
+      ondrop: async (e) => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('drop-target');
+        const from = Number(e.dataTransfer.getData('text/x-deck-key'));
+        if (!from || from === k) return;
+        closePi(ui);
+        await saveNow();
+        try {
+          config = await invoke('swap_keys', { profileId: activeProfile().id, a: from, b: k });
+          selectedKey = k;
+          renderDeck();
+        } catch (err) { toast(err); }
+      },
+    }));
   }
   grid.querySelector(`[data-key="${selectedKey}"]`)?.classList.add('selected');
   const board = h('div', { class: 'deck-board' }, grid, h('div', { class: 'deck-caption' }, `Profil „${activeProfile().name}“ — rozložení jako na decku`));

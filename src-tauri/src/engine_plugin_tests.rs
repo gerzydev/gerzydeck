@@ -290,3 +290,26 @@ fn manifest_title_style_applies_and_editor_alignment_wins() {
     let last = p.images().into_iter().filter(|(k, _)| *k == 3).last().map(|(_, s)| s).unwrap();
     assert!(last.ends_with(r#"|Some("top")|Some(17)|true"#), "{last}");
 }
+
+#[test]
+fn swapping_keys_moves_everything_including_plugin_settings() {
+    let p = P::new();
+    p.connect();
+    p.host_cmds();
+    p.plugin(PluginEvent::SetSettings { context: "A:3".into(), settings: json!({ "n": 7 }) });
+    let (r, rx) = channel();
+    p.tx.send(Msg::SwapKeys { profile_id: "A".into(), a: 3, b: 5, reply: r }).unwrap();
+    let cfg = rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+    assert_eq!(cfg.profiles[0].key(3).action, Action::None);
+    assert_eq!(
+        cfg.profiles[0].key(5).action,
+        Action::Plugin { plugin: "com.x".into(), action: "com.x.act".into(), settings: json!({ "n": 7 }), state: 0 }
+    );
+    assert_eq!(p.store.load().profiles[0].key(5).action, cfg.profiles[0].key(5).action);
+    let cmds = p.host_cmds();
+    assert!(cmds.contains(&"disappear A:3".to_string()), "{cmds:?}");
+    assert!(cmds.contains(&r#"appear com.x A:5 {"n":7}"#.to_string()), "{cmds:?}");
+    let (r, rx) = channel();
+    p.tx.send(Msg::SwapKeys { profile_id: "A".into(), a: 3, b: 99, reply: r }).unwrap();
+    assert!(rx.recv_timeout(Duration::from_secs(2)).unwrap().is_err());
+}

@@ -38,6 +38,11 @@ pub async fn set_config(tx: tauri::State<'_, EngineTx>, config: serde_json::Valu
 }
 
 #[tauri::command]
+pub async fn swap_keys(tx: tauri::State<'_, EngineTx>, profile_id: String, a: u8, b: u8) -> Result<Config, String> {
+    ask(&tx, |r| Msg::SwapKeys { profile_id, a, b, reply: r })?
+}
+
+#[tauri::command]
 pub async fn set_active_profile(tx: tauri::State<'_, EngineTx>, id: String) -> Result<(), String> {
     tell(&tx, Msg::SetActiveProfile(id))
 }
