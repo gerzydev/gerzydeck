@@ -7,6 +7,9 @@ use gerzys_deck::engine::{spawn_engine, EngineDeps, EventSink, Msg, PluginTile, 
 use gerzys_deck::keyboard::SendInputKeyboard;
 use gerzys_deck::os;
 use gerzys_deck::render::{render_key_jpeg, KeySpec};
+use gerzys_deck::plugin_commands::{self, HostTx, PluginNet};
+use gerzys_deck::plugins::host::{spawn_host, HostDeps, Launcher, LoadedPlugin};
+use gerzys_deck::plugins::webview::{CompositeLauncher, HtmlLauncher};
 use gerzys_deck::store::{data_dir, Store};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
@@ -98,9 +101,48 @@ fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
     render_key_jpeg(&KeySpec { image: None, label, bg: t.bg })
 }
 
+/// Interim until the process supervisor lands: exe/node plugins are not started yet.
+struct PendingProcessLauncher;
+impl Launcher for PendingProcessLauncher {
+    fn start(&mut self, plugin: &LoadedPlugin, _port: u16, _uuid: &str, _info: &str) {
+        log::warn!("plugin {} needs the process supervisor (not wired yet)", plugin.id);
+    }
+    fn stop(&mut self, _id: &str) {}
+    fn stop_all(&mut self) {}
+}
+
+/// Interim image decoder until plugins::image lands: PNG/JPEG data URLs and plugin files.
+fn decode_plugin_image(src: &str, dir: Option<&std::path::Path>) -> Option<image::RgbaImage> {
+    use base64::Engine as _;
+    if let Some(rest) = src.strip_prefix("data:") {
+        let (_, b64) = rest.split_once(";base64,")?;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
+        return image::load_from_memory(&bytes).ok().map(|i| i.to_rgba8());
+    }
+    let path = gerzys_deck::plugins::manifest::resolve_image(dir?, src)?;
+    image::open(path).ok().map(|i| i.to_rgba8())
+}
+
 fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     let dir = data_dir();
-    let store = Store::new(dir);
+    let store = Store::new(dir.clone());
+
+    // plugin host: its events go to the engine once the engine exists
+    let engine_slot: Arc<Mutex<Option<std::sync::mpsc::Sender<Msg>>>> = Arc::default();
+    let slot = engine_slot.clone();
+    let host_tx = spawn_host(HostDeps {
+        plugins_dir: gerzys_deck::plugins::plugins_dir(),
+        settings_file: dir.join("plugin-settings.json"),
+        events: Box::new(move |e| {
+            if let Some(tx) = slot.lock().unwrap().as_ref() {
+                let _ = tx.send(Msg::Plugin(e));
+            }
+        }),
+        launcher: Box::new(CompositeLauncher { html: HtmlLauncher::new(app.clone()), procs: Box::new(PendingProcessLauncher) }),
+        decode_image: decode_plugin_image,
+        open_url: |url| os::launch_target(url, &[]),
+        list_processes: os::list_process_names,
+    });
 
     let (dev_events_tx, dev_events_rx) = channel();
     let (device_tx, device_handle) = spawn_device(HidApiBackend::default(), DeckOptions::default(), dev_events_tx);
@@ -113,8 +155,9 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
         sink: Box::new(TauriSink(app.clone())),
         render: render_key_jpeg,
         render_plugin: render_plugin_tile,
-        host_tx: None,
+        host_tx: Some(host_tx.clone()),
     });
+    *engine_slot.lock().unwrap() = Some(engine_tx.clone());
 
     let tx = engine_tx.clone();
     std::thread::Builder::new().name("device-events".into()).spawn(move || {
@@ -145,6 +188,8 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     })?;
 
     app.manage(EngineTx(engine_tx));
+    app.manage(HostTx(Mutex::new(host_tx)));
+    app.manage(PluginNet::new());
     app.manage(Workers(Mutex::new(vec![engine_handle, device_handle])));
     Ok(())
 }
@@ -222,6 +267,14 @@ fn main() {
             commands::list_scancodes,
             commands::get_autostart,
             commands::set_autostart,
+            plugin_commands::plugins_list,
+            plugin_commands::plugins_catalog,
+            plugin_commands::plugins_install,
+            plugin_commands::plugins_install_file,
+            plugin_commands::plugins_uninstall,
+            plugin_commands::pi_open,
+            plugin_commands::pi_close,
+            plugin_commands::open_plugin_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

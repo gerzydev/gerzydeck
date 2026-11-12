@@ -95,6 +95,8 @@ impl PluginView {
 pub enum Msg {
     Device(DeviceEvent),
     Plugin(PluginEvent),
+    /// property inspector for a key: forwarded to the host with the key's current action instance
+    OpenPi { profile_id: String, key: u8, reply: Sender<Option<crate::plugins::link::PiInfo>> },
     /// periodic wake-up for throttled frames and overlay expiry
     Tick,
     Foreground(Foreground),
@@ -575,6 +577,17 @@ impl Engine {
             Msg::Device(DeviceEvent::Raw { device_id, pressed }) => self.sink.raw(device_id, pressed),
             Msg::Device(DeviceEvent::Key { key, pressed }) => self.on_key(key, pressed),
             Msg::Plugin(ev) => self.on_plugin(ev),
+            Msg::OpenPi { profile_id, key, reply } => {
+                let kc = self.config.profiles.iter().find(|p| p.id == profile_id).and_then(|p| Self::key_ctx(&p.id, key, &p.key(key).action));
+                match (kc, &self.host_tx) {
+                    (Some(kc), Some(tx)) => {
+                        let _ = tx.send(HostCmd::PiOpen { key: kc, reply });
+                    }
+                    _ => {
+                        let _ = reply.send(None);
+                    }
+                }
+            }
             Msg::Tick => self.on_tick(),
             Msg::Foreground(fg) => {
                 self.state.foreground_exe = fg.exe;
