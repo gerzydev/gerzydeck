@@ -1,5 +1,6 @@
 // Gerzy's deck — editor. Talks to the Rust core via Tauri invoke/listen.
 import { TEMPLATES, sameAction } from './templates.js';
+import { ICONS, iconById, rasterizeIcon } from './icons.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -36,6 +37,7 @@ let allCodes = [];
 let page = 'deck';
 let selectedKey = 1;
 let showTemplates = false;
+let showIcons = false;
 let recording = null; // { codes:Set, down:Set, onDone }
 let calibration = null; // { step, map, used:Set }
 let saveTimer = null;
@@ -173,7 +175,7 @@ function renderPage() {
 function renderDeck() {
   const grid = h('div', { class: 'deck-grid' });
   for (let k = 1; k <= 15; k++) {
-    grid.append(keyTile(k, { onclick: () => { selectedKey = k; showTemplates = false; renderDeck(); } }));
+    grid.append(keyTile(k, { onclick: () => { selectedKey = k; showTemplates = false; showIcons = false; renderDeck(); } }));
   }
   grid.querySelector(`[data-key="${selectedKey}"]`)?.classList.add('selected');
   const board = h('div', { class: 'deck-board' }, grid, h('div', { class: 'deck-caption' }, `Profil „${activeProfile().name}“ — rozložení jako na decku`));
@@ -208,6 +210,7 @@ function renderEditor() {
   h('div', { class: 'rm-stack', style: 'gap:6px' },
     h('div', { class: 'rm-row' },
       h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => fileInput.click() }, 'Vybrat obrázek…'),
+      h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => { showIcons = !showIcons; renderDeck(); } }, showIcons ? 'Skrýt ikony' : 'Vestavěné ikony'),
       cfg.image && h('button', { class: 'rm-btn is-sm is-ghost is-danger', type: 'button', onclick: () => { cfg.image = null; refreshTile(k); save(); renderDeck(); } }, 'Odebrat')),
     h('span', { class: 'rm-meta' }, 'PNG, JPG, GIF… nebo sem obrázek přetáhni. Ořízne se na čtverec.')),
   fileInput);
@@ -224,8 +227,14 @@ function renderEditor() {
   const tplList = showTemplates && h('div', { class: 'tpl-list' },
     TEMPLATES.map((t) => h('button', {
       class: 'tpl-item', type: 'button',
-      onclick: () => { cfg.action = structuredClone(t.action); cfg.label = t.label; showTemplates = false; save(); renderDeck(); },
-    }, t.name, h('small', {}, t.group))));
+      onclick: async () => {
+        cfg.action = structuredClone(t.action);
+        cfg.label = t.label;
+        showTemplates = false;
+        try { if (t.icon) await applyIcon(cfg, t.icon); } catch (e) { toast(e); }
+        save(); renderDeck();
+      },
+    }, h('span', { class: 'tpl-name' }, t.icon && h('img', { class: 'tpl-icon', src: iconSrc(iconById(t.icon)), alt: '' }), t.name), h('small', {}, t.group))));
 
   const panel = h('div', { class: 'rm-panel' },
     h('div', { class: 'rm-panel-head' },
@@ -238,7 +247,11 @@ function renderEditor() {
         } }, 'Vymazat'))),
     h('div', { class: 'rm-panel-body rm-stack' },
       tplList,
-      h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Obrázek'), drop),
+      h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Obrázek'), drop,
+        showIcons && h('div', { class: 'icon-grid' }, ICONS.map((icon) => h('button', {
+          class: 'icon-pick', type: 'button', title: icon.name,
+          onclick: async () => { try { await applyIcon(cfg, icon.id); showIcons = false; save(); renderDeck(); } catch (e) { toast(e); } },
+        }, h('img', { src: iconSrc(icon), alt: icon.name }))))),
       h('div', { class: 'rm-row' },
         h('label', { class: 'rm-field rm-grow' }, h('span', { class: 'rm-label' }, 'Popisek'),
           h('input', { class: 'rm-input', value: cfg.label, maxLength: 40, placeholder: 'např. Fireball', oninput: (e) => { cfg.label = e.target.value; refreshTile(k); save(); } })),
@@ -252,6 +265,15 @@ function renderEditor() {
   redrawAction();
   return panel;
 }
+
+/** Puts a built-in icon on a key (rasterised in the webview, stored like any upload). */
+async function applyIcon(cfg, iconId) {
+  const icon = iconById(iconId);
+  if (!icon) return;
+  cfg.image = await invoke('import_image', await rasterizeIcon(icon));
+}
+
+const iconSrc = (icon) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(icon.svg);
 
 function defaultAction(type) {
   switch (type) {
