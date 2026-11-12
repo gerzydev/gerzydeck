@@ -34,7 +34,7 @@ impl ActionRunner {
     pub fn press(&self, key: u8, action: &Action) -> Option<JoinHandle<()>> {
         match action {
             // plugin actions are routed to the plugin host by the engine, not executed here
-            Action::None | Action::Plugin { .. } => {}
+            Action::None | Action::Plugin { .. } | Action::Usage { .. } => {}
             Action::Keys { codes } => {
                 let mut held = self.held.lock().unwrap();
                 if held.contains_key(&key) {

@@ -39,6 +39,10 @@ fn render_plugin(tile: &PluginTile) -> Vec<u8> {
     format!("P|{:?}|{:?}|{:?}|{}|{}{style}", tile.label, tile.title, tile.overlay, tile.image.is_some(), tile.missing).into_bytes()
 }
 
+fn render_usage(t: &UsageTile) -> Vec<u8> {
+    format!("U|{}|{:?}|{}|{:?}", t.name, t.percent, t.reset.is_some(), t.error).into_bytes()
+}
+
 fn cfg() -> Config {
     normalize_config(&json!({
         "defaultProfileId": "A", "activeProfileId": "A",
@@ -46,7 +50,8 @@ fn cfg() -> Config {
             { "id": "A", "name": "A", "keys": {
                 "1": { "action": { "type": "keys", "codes": ["KeyQ"] } },
                 "3": { "action": { "type": "plugin", "plugin": "com.x", "action": "com.x.act", "settings": { "n": 1 } } },
-                "4": { "action": { "type": "profile", "profileId": "B" } }
+                "4": { "action": { "type": "profile", "profileId": "B" } },
+                "6": { "action": { "type": "usage", "provider": "claude", "window": "session" } }
             } },
             { "id": "B", "name": "B", "keys": {} }
         ]
@@ -59,6 +64,7 @@ struct P {
     host: Receiver<HostCmd>,
     kb: Rec,
     store: Store,
+    wake: Receiver<()>,
 }
 
 impl P {
@@ -68,6 +74,7 @@ impl P {
         let (htx, hrx) = channel();
         let (dtx, drx) = channel();
         let kb = Rec::default();
+        let (wtx, wrx) = channel();
         let (tx, _h) = spawn_engine(EngineDeps {
             store: store.clone(),
             device_tx: dtx,
@@ -77,9 +84,11 @@ impl P {
             sink: Box::new(Sink),
             render,
             render_plugin,
+            render_usage,
+            usage_wake: Some(wtx),
             host_tx: Some(htx),
         });
-        let p = P { tx, dev: drx, host: hrx, kb, store };
+        let p = P { tx, dev: drx, host: hrx, kb, store, wake: wrx };
         p.sync();
         p
     }
@@ -334,4 +343,28 @@ fn custom_image_on_a_plugin_key_keeps_the_live_title() {
     std::thread::sleep(Duration::from_millis(150));
     let last = p.images().into_iter().filter(|(k, _)| *k == 3).last().map(|(_, s)| s);
     assert_eq!(last.as_deref(), Some(r#"P|None|Some("8%")|None|true|false"#));
+}
+
+#[test]
+fn usage_key_shows_the_window_and_refreshes_on_press() {
+    use crate::usage::{Usage, Window};
+    let p = P::new();
+    p.connect();
+    let first = p.images().into_iter().find(|(k, _)| *k == 6).map(|(_, s)| s);
+    assert_eq!(first.as_deref(), Some("U|Claude 5h|None|false|None"));
+    let (r, rx) = channel();
+    p.tx.send(Msg::UsageWanted(r)).unwrap();
+    assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), vec!["claude".to_string()]);
+    let at = crate::usage::now_s() + 3600;
+    p.tx.send(Msg::Usage { provider: "claude".into(), result: Ok(Usage { session: Some(Window { percent: 21.0, resets_at: at }), weekly: None }) }).unwrap();
+    let k6 = p.images().into_iter().filter(|(k, _)| *k == 6).last().map(|(_, s)| s);
+    assert_eq!(k6.as_deref(), Some("U|Claude 5h|Some(21.0)|true|None"));
+    p.tx.send(Msg::Usage { provider: "claude".into(), result: Err("Přihlášení vypršelo".into()) }).unwrap();
+    let k6 = p.images().into_iter().filter(|(k, _)| *k == 6).last().map(|(_, s)| s);
+    assert_eq!(k6.as_deref(), Some(r#"U|Claude 5h|None|false|Some("Přihlášení vypršelo")"#));
+    while p.wake.try_recv().is_ok() {}
+    p.key(6, true);
+    p.key(6, false);
+    p.sync();
+    assert!(p.wake.try_recv().is_ok(), "a press asks for fresh numbers");
 }

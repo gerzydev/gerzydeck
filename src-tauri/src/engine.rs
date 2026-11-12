@@ -103,6 +103,10 @@ impl PluginView {
 
 pub enum Msg {
     Device(DeviceEvent),
+    /// fresh numbers from the usage poller
+    Usage { provider: String, result: Result<crate::usage::Usage, String> },
+    /// which usage providers have a key on the active profile
+    UsageWanted(Sender<Vec<String>>),
     Plugin(PluginEvent),
     /// drag & drop in the editor: swap two keys of a profile (content, action, plugin settings)
     SwapKeys { profile_id: String, a: u8, b: u8, reply: Sender<Result<Config, String>> },
@@ -122,6 +126,17 @@ pub enum Msg {
     Shutdown,
 }
 
+/// What a usage key shows; drawn by `EngineDeps::render_usage`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageTile {
+    pub name: String,
+    pub percent: Option<f32>,
+    /// countdown to the reset
+    pub reset: Option<String>,
+    pub error: Option<String>,
+    pub bg: [u8; 3],
+}
+
 pub struct EngineDeps {
     pub store: Store,
     pub device_tx: Sender<DeviceCmd>,
@@ -131,6 +146,9 @@ pub struct EngineDeps {
     pub sink: Box<dyn EventSink>,
     pub render: fn(&KeySpec) -> Vec<u8>,
     pub render_plugin: fn(&PluginTile) -> Vec<u8>,
+    pub render_usage: fn(&UsageTile) -> Vec<u8>,
+    /// wakes the usage poller (a usage key was pressed)
+    pub usage_wake: Option<Sender<()>>,
     pub host_tx: Option<Sender<HostCmd>>,
 }
 
@@ -151,6 +169,9 @@ struct Engine {
     sink: Box<dyn EventSink>,
     render: fn(&KeySpec) -> Vec<u8>,
     render_plugin: fn(&PluginTile) -> Vec<u8>,
+    render_usage: fn(&UsageTile) -> Vec<u8>,
+    usage_wake: Option<Sender<()>>,
+    usage: HashMap<String, Result<crate::usage::Usage, String>>,
     host_tx: Option<Sender<HostCmd>>,
     /// action instances the host was told are visible (context → instance)
     visible: HashMap<String, KeyCtx>,
@@ -188,6 +209,9 @@ impl Engine {
             sink: d.sink,
             render: d.render,
             render_plugin: d.render_plugin,
+            render_usage: d.render_usage,
+            usage_wake: d.usage_wake,
+            usage: HashMap::new(),
             host_tx: d.host_tx,
             visible: HashMap::new(),
             sent_titles: HashMap::new(),
@@ -333,6 +357,21 @@ impl Engine {
                 .filter(|(_, until)| *until > now)
                 .map(|(o, _)| o)
                 .unwrap_or_default();
+            if let Action::Usage { provider, window } = &cfg.action {
+                if !self.usage.contains_key(provider) {
+                    // no numbers yet (start, profile switch): ask right away instead of waiting a minute
+                    if let Some(w) = &self.usage_wake {
+                        let _ = w.send(());
+                    }
+                }
+                let tile = self.usage_tile(provider, window, cfg);
+                let sig = format!("U|{tile:?}");
+                if self.rendered.get(&k) != Some(&sig) {
+                    images.push((k, (self.render_usage)(&tile)));
+                    self.rendered.insert(k, sig);
+                }
+                continue;
+            }
             let sig = match &plugin {
                 Some((p, state)) => format!(
                     "P|{}|{:?}|{}|{}|{}|{:?}|{}|{:?}",
@@ -389,6 +428,35 @@ impl Engine {
         if !images.is_empty() {
             let _ = self.device_tx.send(DeviceCmd::SetImages(images));
         }
+    }
+
+    fn usage_tile(&self, provider: &str, window: &str, cfg: &crate::config::KeyConfig) -> UsageTile {
+        let service = if provider == "claude" { "Claude" } else { "GPT" };
+        let name = if cfg.label.is_empty() { format!("{service} {}", if window == "weekly" { "týden" } else { "5h" }) } else { cfg.label.clone() };
+        let mut tile = UsageTile { name, percent: None, reset: None, error: None, bg: parse_hex(&cfg.bg) };
+        match self.usage.get(provider) {
+            Some(Ok(u)) => {
+                if let Some(w) = if window == "weekly" { u.weekly } else { u.session } {
+                    tile.percent = Some(w.percent);
+                    tile.reset = Some(crate::usage::reset_text(crate::usage::now_s(), w.resets_at));
+                }
+            }
+            Some(Err(e)) => tile.error = Some(e.clone()),
+            None => {}
+        }
+        tile
+    }
+
+    fn wanted_usage(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for k in 1..=15u8 {
+            if let Action::Usage { provider, .. } = &self.active().key(k).action {
+                if !out.contains(provider) {
+                    out.push(provider.clone());
+                }
+            }
+        }
+        out
     }
 
     /// Mutable plugin action at a context, if the context names a plugin key in the config.
@@ -523,6 +591,11 @@ impl Engine {
         }
         if pressed {
             let action = self.active().key(key).action.clone();
+            if matches!(action, Action::Usage { .. }) {
+                if let Some(w) = &self.usage_wake {
+                    let _ = w.send(());
+                }
+            }
             let _ = self.runner.press(key, &action);
             let switches: Vec<String> = std::mem::take(&mut *self.pending_switches.lock().unwrap());
             for id in switches {
@@ -664,6 +737,17 @@ impl Engine {
                 }
             }
             Msg::Tick => self.on_tick(),
+            Msg::Usage { provider, result } => {
+                // keep showing the last numbers when a refresh fails for network reasons
+                let keep = matches!((&result, self.usage.get(&provider)), (Err(e), Some(Ok(_))) if e.contains("internet") || e.contains("dotaz"));
+                if !keep {
+                    self.usage.insert(provider, result);
+                }
+                self.render_active();
+            }
+            Msg::UsageWanted(reply) => {
+                let _ = reply.send(self.wanted_usage());
+            }
             Msg::Foreground(fg) => {
                 self.state.foreground_exe = fg.exe;
                 self.state.foreground_elevated = fg.elevated;
@@ -837,6 +921,8 @@ mod tests {
                 sink: Box::new(FakeSink(sink.clone())),
                 render,
                 render_plugin,
+                render_usage: |_| Vec::new(),
+                usage_wake: None,
                 host_tx: Some(htx),
             });
             let t = T { tx, dev: drx, _host: hrx, kb, sink, store };
@@ -1007,6 +1093,8 @@ mod tests {
             sink: Box::new(BlockingSink(gate.clone())),
             render,
             render_plugin,
+            render_usage: |_| Vec::new(),
+            usage_wake: None,
             host_tx: None,
         });
         let (r, rx) = channel();

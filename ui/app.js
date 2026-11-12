@@ -12,10 +12,12 @@ const TEXT_NOTE = 'Psaní textu funguje v běžných aplikacích, hry ho mohou i
 
 const ACTION_TYPES = [
   ['none', 'Nic'], ['keys', 'Klávesa / zkratka'], ['macro', 'Makro'], ['launch', 'Spustit program / web'],
-  ['media', 'Média a hlasitost'], ['system', 'Systém'], ['profile', 'Přepnout profil'], ['plugin', 'Plugin…'],
+  ['media', 'Média a hlasitost'], ['system', 'Systém'], ['profile', 'Přepnout profil'], ['usage', 'Využití AI (Claude, GPT)'], ['plugin', 'Plugin…'],
 ];
 const MEDIA = [['playpause', 'Přehrát / pauza'], ['next', 'Další skladba'], ['prev', 'Předchozí skladba'], ['mute', 'Ztlumit zvuk'], ['volup', 'Hlasitost +'], ['voldown', 'Hlasitost −']];
 const SYSTEM = [['lock', 'Zamknout PC'], ['sleep', 'Uspat PC']];
+const USAGE_PROVIDERS = [['claude', 'Claude (přihlášení z Claude Code)'], ['codex', 'ChatGPT (přihlášení z Codexu)']];
+const USAGE_WINDOWS = [['session', '5hodinové okno'], ['weekly', 'Týdenní limit']];
 const STEP_TYPES = [['tap', 'Stisk'], ['down', 'Držet'], ['up', 'Pustit'], ['wait', 'Čekat'], ['text', 'Napsat text']];
 const MODS = ['ControlLeft', 'ControlRight', 'ShiftLeft', 'ShiftRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight'];
 const NAMES = {
@@ -111,6 +113,7 @@ function actionSummary(a) {
     case 'media': return MEDIA.find(([v]) => v === a.command)?.[1] ?? 'Média';
     case 'system': return SYSTEM.find(([v]) => v === a.command)?.[1] ?? 'Systém';
     case 'plugin': return pluginAction(a.plugin, a.action).action?.name ?? 'Plugin';
+    case 'usage': return `${a.provider === 'claude' ? 'Claude' : 'GPT'} – ${a.window === 'weekly' ? 'týden' : '5h okno'}`;
     case 'profile': return a.profileId === '__back' ? 'Předchozí profil' : `Profil: ${config.profiles.find((p) => p.id === a.profileId)?.name ?? '?'}`;
     default: return 'Bez akce';
   }
@@ -331,8 +334,9 @@ const ACTION_ICONS = {
   system: '<path d="M12 3v8"/><path d="M6.3 6.6a8 8 0 1 0 11.4 0"/>',
   profile: '<path d="M7 7h12l-3-3"/><path d="M17 17H5l3 3"/>',
   plugin: '<path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/>',
+  usage: '<path d="M4 15a8 8 0 0 1 16 0"/><path d="M12 15l4-5"/><path d="M4 19h16"/>',
 };
-const ACTION_SHORT = { none: 'Nic', keys: 'Klávesa', macro: 'Makro', launch: 'Spustit', media: 'Média', system: 'Systém', profile: 'Profil', plugin: 'Plugin' };
+const ACTION_SHORT = { none: 'Nic', keys: 'Klávesa', macro: 'Makro', launch: 'Spustit', media: 'Média', system: 'Systém', profile: 'Profil', usage: 'Využití AI', plugin: 'Plugin' };
 
 /** 4×2 grid of action types; the Plugin tile shows the chosen plugin action. */
 function actionGrid(cfg, onPick) {
@@ -361,6 +365,7 @@ function defaultAction(type) {
     case 'media': return { type, command: 'playpause' };
     case 'system': return { type, command: 'lock' };
     case 'profile': return { type, profileId: '__back' };
+    case 'usage': return { type, provider: 'claude', window: 'session' };
     default: return { type: 'none' };
   }
 }
@@ -445,6 +450,14 @@ function actionFields(cfg, changed, redraw, k) {
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, MEDIA.map(([v, l]) => option(v, l, a.command)))];
     case 'system':
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, SYSTEM.map(([v, l]) => option(v, l, a.command)))];
+    case 'usage':
+      return [
+        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Služba'),
+          h('select', { class: 'rm-select', onchange: (e) => { a.provider = e.target.value; changed(); } }, USAGE_PROVIDERS.map(([v, l]) => option(v, l, a.provider)))),
+        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Limit'),
+          h('select', { class: 'rm-select', onchange: (e) => { a.window = e.target.value; changed(); } }, USAGE_WINDOWS.map(([v, l]) => option(v, l, a.window)))),
+        h('div', { class: 'rm-meta' }, 'Tlačítko ukáže procenta a čas do resetu, obnovuje se každou minutu a stiskem hned. Použije přihlášení z Claude Code / Codexu – ty nemusí běžet, stačí v nich být přihlášený. Popisek nahradí název nahoře.'),
+      ];
     case 'profile':
       return [h('select', { class: 'rm-select', onchange: (e) => { a.profileId = e.target.value; changed(); } },
         option('__back', 'Předchozí profil', a.profileId),

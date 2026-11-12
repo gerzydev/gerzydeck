@@ -188,6 +188,56 @@ pub fn render_key_jpeg(spec: &KeySpec) -> Vec<u8> {
 }
 
 /// Round a tile, then encode it for the device.
+/// AI usage key: name on top, big percentage, coloured bar, countdown to the reset.
+pub fn render_usage_jpeg(name: &str, percent: Option<f32>, reset: Option<&str>, error: Option<&str>, bg: [u8; 3]) -> Vec<u8> {
+    let mut c = RgbImage::from_pixel(KEY_SIZE, KEY_SIZE, Rgb(bg));
+    let Some(font) = font() else { return tile_jpeg(&c) };
+    let center = |c: &mut RgbImage, text: &str, size: f32, y: i32, color: Rgb<u8>| {
+        let scale = PxScale::from(size);
+        let (w, _) = text_size(scale, font, text);
+        draw_text_mut(c, color, ((KEY_SIZE as i32 - w as i32) / 2).max(1), y, scale, font, text);
+    };
+    let dim = Rgb([0xA8, 0xAD, 0xB2]);
+    center(&mut c, &shorten(name), 14.0, 7, dim);
+    if let Some(err) = error {
+        center(&mut c, "!", 30.0, 22, Rgb([0xF2, 0xB8, 0x4B]));
+        // two short lines
+        let mut lines = vec![String::new()];
+        for word in err.split_whitespace() {
+            let cur = lines.last_mut().unwrap();
+            if !cur.is_empty() && cur.chars().count() + word.chars().count() > 14 {
+                if lines.len() == 3 { break; }
+                lines.push(String::new());
+            }
+            let cur = lines.last_mut().unwrap();
+            if !cur.is_empty() { cur.push(' '); }
+            cur.push_str(word);
+        }
+        for (i, l) in lines.iter().enumerate() {
+            center(&mut c, l, 11.0, 56 + i as i32 * 13, dim);
+        }
+        return tile_jpeg(&c);
+    }
+    let Some(p) = percent else {
+        center(&mut c, "…", 28.0, 34, dim);
+        return tile_jpeg(&c);
+    };
+    let color = if p >= 90.0 { Rgb([0xFF, 0x5A, 0x5A]) } else if p >= 70.0 { Rgb([0xF2, 0xB8, 0x4B]) } else { Rgb([0x46, 0xE0, 0x6C]) };
+    center(&mut c, &format!("{} %", p.round() as i64), 30.0, 27, color);
+    // bar
+    let (x0, x1, y0, h) = (14u32, KEY_SIZE - 14, 68u32, 6u32);
+    let fill = x0 + ((x1 - x0) as f32 * (p / 100.0).clamp(0.0, 1.0)).round() as u32;
+    for y in y0..y0 + h {
+        for x in x0..x1 {
+            c.put_pixel(x, y, if x < fill { color } else { Rgb([0x3A, 0x3E, 0x44]) });
+        }
+    }
+    if let Some(r) = reset {
+        center(&mut c, &format!("za {r}"), 12.0, 80, dim);
+    }
+    tile_jpeg(&c)
+}
+
 pub fn tile_jpeg(canvas: &RgbImage) -> Vec<u8> {
     let mut canvas = canvas.clone();
     round_corners(&mut canvas, CORNER_RADIUS);
@@ -422,5 +472,22 @@ mod preview {
             imageops::overlay(&mut sheet, &tile, i as i64 * 120, 0);
         }
         sheet.save(std::env::temp_dir().join("deck-preview.png")).unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn write_usage_preview() {
+        let tiles = [
+            render_usage_jpeg("Claude 5h", Some(21.0), Some("4 h 19"), None, DEFAULT_BG),
+            render_usage_jpeg("GPT týden", Some(76.0), Some("1 d 22 h"), None, DEFAULT_BG),
+            render_usage_jpeg("GPT 5h", Some(100.0), Some("2 h 41"), None, DEFAULT_BG),
+            render_usage_jpeg("Claude 5h", None, None, Some("Přihlášení vypršelo, přihlas se znovu"), DEFAULT_BG),
+        ];
+        let mut sheet = RgbImage::from_pixel(4 * 120, 110, Rgb([255, 255, 255]));
+        for (i, j) in tiles.iter().enumerate() {
+            let tile = imageops::rotate180(&image::load_from_memory(j).unwrap().to_rgb8());
+            imageops::overlay(&mut sheet, &tile, i as i64 * 120, 3);
+        }
+        sheet.save(std::env::temp_dir().join("deck-usage-preview.png")).unwrap();
     }
 }

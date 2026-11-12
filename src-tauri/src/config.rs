@@ -63,6 +63,8 @@ pub enum Action {
     },
     /// Action of a Stream Deck SDK plugin. `settings`/`state` are owned by the core (plugins write them).
     Plugin { plugin: String, action: String, settings: Value, state: u8 },
+    /// AI plan usage on the key: provider "claude" | "codex", window "session" (5 h) | "weekly"
+    Usage { provider: String, window: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -200,6 +202,14 @@ pub fn normalize_action(v: &Value) -> Action {
                 let settings = if v["settings"].is_object() { v["settings"].clone() } else { serde_json::json!({}) };
                 let state = v["state"].as_u64().filter(|&n| n < 16).unwrap_or(0) as u8;
                 Action::Plugin { plugin, action, settings, state }
+            }
+            "usage" => {
+                let provider = s(&v["provider"], 20);
+                let window = s(&v["window"], 20);
+                if !crate::usage::PROVIDERS.contains(&provider.as_str()) || !matches!(window.as_str(), "session" | "weekly") {
+                    return None;
+                }
+                Action::Usage { provider, window }
             }
             "profile" => {
                 let profile_id = s(&v["profileId"], 64);

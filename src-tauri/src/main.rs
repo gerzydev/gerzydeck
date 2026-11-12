@@ -155,6 +155,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
 
     let (dev_events_tx, dev_events_rx) = channel();
     let (device_tx, device_handle) = spawn_device(HidApiBackend::default(), DeckOptions::default(), dev_events_tx);
+    let (usage_wake_tx, usage_wake_rx) = channel();
     let (engine_tx, engine_handle) = spawn_engine(EngineDeps {
         store,
         device_tx,
@@ -164,9 +165,25 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
         sink: Box::new(TauriSink(app.clone())),
         render: render_key_jpeg,
         render_plugin: render_plugin_tile,
+        render_usage: |t| gerzys_deck::render::render_usage_jpeg(&t.name, t.percent, t.reset.as_deref(), t.error.as_deref(), t.bg),
+        usage_wake: Some(usage_wake_tx),
         host_tx: Some(host_tx.clone()),
     });
     *engine_slot.lock().unwrap() = Some(engine_tx.clone());
+
+    // AI usage keys: the poller asks the engine which services are on screen
+    let (ask, publish) = (engine_tx.clone(), engine_tx.clone());
+    gerzys_deck::usage::spawn_poller(
+        usage_wake_rx,
+        move || {
+            let (r, rx) = channel();
+            let _ = ask.send(Msg::UsageWanted(r));
+            rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default()
+        },
+        move |provider, result| {
+            let _ = publish.send(Msg::Usage { provider, result });
+        },
+    );
 
     let tx = engine_tx.clone();
     std::thread::Builder::new().name("device-events".into()).spawn(move || {
