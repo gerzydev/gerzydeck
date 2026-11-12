@@ -64,7 +64,7 @@ pub(crate) fn valid_id(id: &str) -> bool {
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
 }
-fn zip_path(name: &str) -> Result<PathBuf, InstallError> {
+pub(crate) fn zip_path(name: &str) -> Result<PathBuf, InstallError> {
     if name.starts_with(['/', '\\']) {
         return Err(invalid("archiv obsahuje absolutní cestu"));
     }

@@ -13,3 +13,5 @@ pub mod plugins;
 pub mod plugin_commands;
 #[cfg(test)]
 mod engine_plugin_tests;
+pub mod icons;
+pub mod icon_commands;

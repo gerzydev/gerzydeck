@@ -246,6 +246,16 @@ fn main() {
                 .body(served.body)
                 .unwrap_or_default()
         })
+        .register_uri_scheme_protocol(gerzys_deck::icons::SCHEME, |_ctx, request| {
+            let served = gerzys_deck::icons::IconStore::new(gerzys_deck::icons::IconStore::default_root()).serve(request.uri().path());
+            tauri::http::Response::builder()
+                .status(served.status)
+                .header("Content-Type", served.mime)
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Cache-Control", "no-store")
+                .body(served.body)
+                .unwrap_or_default()
+        })
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -287,6 +297,13 @@ fn main() {
             plugin_commands::pi_open,
             plugin_commands::pi_close,
             plugin_commands::open_plugin_log,
+            gerzys_deck::icon_commands::icons_library,
+            gerzys_deck::icon_commands::icons_upload,
+            gerzys_deck::icon_commands::icons_delete,
+            gerzys_deck::icon_commands::icon_packs,
+            gerzys_deck::icon_commands::icon_pack_icons,
+            gerzys_deck::icon_commands::icon_pack_import,
+            gerzys_deck::icon_commands::icon_pack_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

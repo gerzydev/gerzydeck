@@ -1,6 +1,7 @@
 // Gerzy's deck — editor. Talks to the Rust core via Tauri invoke/listen.
 import { TEMPLATES, sameAction } from './templates.js';
-import { ICONS, iconById, rasterizeIcon } from './icons.js';
+import { iconById, rasterizeIcon } from './icons.js';
+import { renderIconsPage, pickIcon } from './iconlib.js';
 import { renderPluginsPage, loadInstalled, pluginActionFields, pickPluginAction, closePi, pluginAction } from './plugins.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -30,6 +31,7 @@ const PAGES = {
   deck: ['Deck', 'Klikni na tlačítko a nastav mu obrázek a akci. Změny se ukládají hned.'],
   plugins: ['Pluginy', 'Pluginy pro Stream Deck: OBS, Spotify, Discord, PC metriky a stovky dalších.'],
   profiles: ['Profily', 'Každý profil má vlastních 15 tlačítek. Profil se může přepnout sám podle programu v popředí.'],
+  icons: ['Ikony', 'Katalog open-source ikon, tvoje vlastní obrázky a balíky ikon pro Stream Deck.'],
   settings: ['Nastavení', 'Jas, spouštění s Windows a kalibrace tlačítek.'],
 };
 
@@ -39,7 +41,6 @@ let allCodes = [];
 let page = 'deck';
 let selectedKey = 1;
 let showTemplates = false;
-let showIcons = false;
 let recording = null; // { codes:Set, down:Set, onDone }
 let calibration = null; // { step, map, used:Set }
 let saveTimer = null;
@@ -181,6 +182,7 @@ function setPage(p) {
 function renderPage() {
   if (page === 'deck') renderDeck();
   else if (page === 'plugins') renderPluginsPage(ui, $('page-plugins'));
+  else if (page === 'icons') renderIconsPage(ui, $('page-icons'));
   else if (page === 'profiles') renderProfiles();
   else renderSettings();
 }
@@ -191,7 +193,7 @@ function renderDeck() {
   for (let k = 1; k <= 15; k++) {
     grid.append(keyTile(k, {
       draggable: true,
-      onclick: () => { if (k !== selectedKey) closePi(ui); selectedKey = k; showTemplates = false; showIcons = false; renderDeck(); },
+      onclick: () => { if (k !== selectedKey) closePi(ui); selectedKey = k; showTemplates = false; renderDeck(); },
       ondragstart: (e) => { e.dataTransfer.setData('text/x-deck-key', String(k)); e.dataTransfer.effectAllowed = 'move'; },
       ondragover: (e) => { if (e.dataTransfer.types.includes('text/x-deck-key')) { e.preventDefault(); e.currentTarget.classList.add('drop-target'); } },
       ondragleave: (e) => e.currentTarget.classList.remove('drop-target'),
@@ -242,10 +244,15 @@ function renderEditor() {
   thumb,
   h('div', { class: 'rm-stack', style: 'gap:6px' },
     h('div', { class: 'rm-row' },
-      h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => fileInput.click() }, 'Vybrat obrázek…'),
-      h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => { showIcons = !showIcons; renderDeck(); } }, showIcons ? 'Skrýt ikony' : 'Vestavěné ikony'),
+      h('button', { class: 'rm-btn is-sm', type: 'button', onclick: async () => {
+        const res = await pickIcon(ui);
+        if (res === 'file') fileInput.click();
+        else if (res) {
+          try { cfg.image = await invoke('import_image', res); save(); renderDeck(); } catch (e) { toast(e); }
+        }
+      } }, 'Vybrat obrázek…'),
       cfg.image && h('button', { class: 'rm-btn is-sm is-ghost is-danger', type: 'button', onclick: () => { cfg.image = null; refreshTile(k); save(); renderDeck(); } }, 'Odebrat')),
-    h('span', { class: 'rm-meta' }, 'PNG, JPG, GIF… nebo sem obrázek přetáhni. Ořízne se na čtverec.')),
+    h('span', { class: 'rm-meta' }, 'Katalog ikon, tvoje ikony, balíky… nebo sem obrázek přetáhni.')),
   fileInput);
 
   async function importImage(file) {
@@ -281,10 +288,7 @@ function renderEditor() {
     h('div', { class: 'rm-panel-body rm-stack' },
       tplList,
       h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Obrázek'), drop,
-        showIcons && h('div', { class: 'icon-grid' }, ICONS.map((icon) => h('button', {
-          class: 'icon-pick', type: 'button', title: icon.name,
-          onclick: async () => { try { await applyIcon(cfg, icon.id); showIcons = false; save(); renderDeck(); } catch (e) { toast(e); } },
-        }, h('img', { src: iconSrc(icon), alt: icon.name }))))),
+        ),
       h('div', { class: 'rm-row' },
         h('label', { class: 'rm-field rm-grow' }, h('span', { class: 'rm-label' }, 'Popisek'),
           h('input', { class: 'rm-input', value: cfg.label, maxLength: 40, placeholder: 'např. Fireball', oninput: (e) => { cfg.label = e.target.value; refreshTile(k); save(); } })),
