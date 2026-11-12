@@ -153,9 +153,7 @@ impl Host {
         queue.extend(mine.iter().map(|k| protocol::appear_event("willAppear", &k.ctx).to_string()));
         self.plugins.insert(id.clone(), PluginRt { loaded, tx: None, queue, ever_connected: false, status: PluginStatus::Starting });
         for k in mine {
-            if let Some(img) = self.default_image(&k) {
-                self.emit(PluginEvent::SetImage { context: k.ctx.context.clone(), image: Some(Arc::new(img)), state: None });
-            }
+            self.emit_default_images(&k);
         }
         self.set_status(&id, PluginStatus::Starting);
     }
@@ -216,10 +214,11 @@ impl Host {
     }
 
     /// Default image of an action state from the manifest.
-    fn default_image(&self, kc: &KeyCtx) -> Option<RgbaImage> {
+    /// Manifest image of one state (falls back to the action icon).
+    fn state_image(&self, kc: &KeyCtx, index: usize) -> Option<RgbaImage> {
         let p = self.plugins.get(&kc.plugin)?;
         let action = p.loaded.manifest.actions.iter().find(|a| a.uuid == kc.ctx.action)?;
-        let state = action.states.get(kc.ctx.state as usize).or_else(|| action.states.first())?;
+        let state = action.states.get(index).or_else(|| action.states.first())?;
         let base = if state.image.is_empty() { &action.icon } else { &state.image };
         if base.is_empty() {
             return None;
@@ -227,6 +226,20 @@ impl Host {
         let path = super::manifest::resolve_image(&p.loaded.dir, base)?;
         let rel = path.strip_prefix(p.loaded.dir.canonicalize().ok()?).ok()?.to_string_lossy().replace('\\', "/");
         (self.deps.decode_image)(&rel, Some(&p.loaded.dir))
+    }
+
+    /// Sends the manifest image of every state, so a later setState shows the right icon.
+    fn emit_default_images(&self, kc: &KeyCtx) {
+        let count = self
+            .plugins
+            .get(&kc.plugin)
+            .and_then(|p| p.loaded.manifest.actions.iter().find(|a| a.uuid == kc.ctx.action))
+            .map_or(0, |a| a.states.len());
+        for i in 0..count.min(16) {
+            if let Some(img) = self.state_image(kc, i) {
+                self.emit(PluginEvent::SetImage { context: kc.ctx.context.clone(), image: Some(Arc::new(img)), state: Some(i as u8) });
+            }
+        }
     }
 
     /// Title hints (alignment, size, visibility) of every state of an action, from the manifest.
@@ -273,9 +286,7 @@ impl Host {
                     self.instances.insert(kc.ctx.context.clone(), kc);
                     return true;
                 }
-                if let Some(img) = self.default_image(&kc) {
-                    self.emit(PluginEvent::SetImage { context: kc.ctx.context.clone(), image: Some(Arc::new(img)), state: None });
-                }
+                self.emit_default_images(&kc);
                 if let Some(styles) = self.title_styles(&kc) {
                     self.emit(PluginEvent::TitleStyle { context: kc.ctx.context.clone(), styles });
                 }
@@ -425,11 +436,24 @@ impl Host {
         match msg {
             Inbound::SetImage { context, image, state } if self.owns(id, &context) => {
                 let dir = self.plugins.get(id).map(|p| p.loaded.dir.clone());
-                let decoded = match &image {
-                    Some(src) => (self.deps.decode_image)(src, dir.as_deref()),
-                    None => self.instances.get(&context).cloned().and_then(|k| self.default_image(&k)),
-                };
-                self.emit(PluginEvent::SetImage { context, image: decoded.map(Arc::new), state });
+                match &image {
+                    Some(src) => {
+                        let decoded = (self.deps.decode_image)(src, dir.as_deref());
+                        self.emit(PluginEvent::SetImage { context, image: decoded.map(Arc::new), state });
+                    }
+                    // empty image = back to the manifest images
+                    None => match (state, self.instances.get(&context).cloned()) {
+                        (Some(st), Some(k)) => {
+                            let img = self.state_image(&k, st as usize);
+                            self.emit(PluginEvent::SetImage { context, image: img.map(Arc::new), state: Some(st) });
+                        }
+                        (None, Some(k)) => {
+                            self.emit(PluginEvent::SetImage { context, image: None, state: None });
+                            self.emit_default_images(&k);
+                        }
+                        _ => {}
+                    },
+                }
             }
             Inbound::SetTitle { context, title, state } if self.owns(id, &context) => self.emit(PluginEvent::SetTitle { context, title, state }),
             Inbound::SetState { context, state } if self.owns(id, &context) => {

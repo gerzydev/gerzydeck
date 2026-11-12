@@ -22,6 +22,7 @@ fn plugins_dir() -> std::path::PathBuf {
     std::fs::write(p.join("fake.exe"), "x").unwrap();
     std::fs::write(p.join("pi.html"), "<html></html>").unwrap();
     std::fs::write(p.join("icon.png"), "png").unwrap();
+    std::fs::write(p.join("icon2.png"), "png").unwrap();
     d
 }
 
@@ -148,7 +149,9 @@ fn launches_installed_plugins_and_queues_until_registered() {
 fn will_appear_sends_the_manifest_state_image_as_default() {
     let h = start();
     h.tx.send(HostCmd::WillAppear(ctx(json!({})))).unwrap();
-    h.wait_event(|e| matches!(e, PluginEvent::SetImage { context, image: Some(_), state: None } if context == "A:3"));
+    // one default image per manifest state, so setState(1) shows the second state's icon
+    h.wait_event(|e| matches!(e, PluginEvent::SetImage { context, image: Some(_), state: Some(0) } if context == "A:3"));
+    h.wait_event(|e| matches!(e, PluginEvent::SetImage { context, image: Some(_), state: Some(1) } if context == "A:3"));
 }
 
 #[test]
