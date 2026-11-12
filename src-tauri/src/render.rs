@@ -8,7 +8,8 @@ use imageproc::drawing::{draw_text_mut, text_size};
 use std::io::Cursor;
 use std::sync::OnceLock;
 
-pub const KEY_SIZE: u32 = 100;
+/// Measured on the D6 (firmware V3): the key panel shows 104×104 px; 100×100 left a 4 px stale strip top/left.
+pub const KEY_SIZE: u32 = 104;
 pub const UPLOAD_SIZE: u32 = 200;
 pub const MAX_UPLOAD_BYTES: usize = 20 * 1024 * 1024;
 pub const DEFAULT_BG: [u8; 3] = [0x14, 0x16, 0x18];
@@ -102,8 +103,9 @@ fn draw_label(canvas: &mut RgbImage, label: &str, with_image: bool) {
     let (w, h) = text_size(scale, font, &text);
     if with_image {
         // dark gradient strip so the label stays readable on any picture
-        for y in 62..KEY_SIZE {
-            let a = (y - 62) as f32 / (KEY_SIZE - 62) as f32 * 0.75;
+        let strip = KEY_SIZE * 62 / 100;
+        for y in strip..KEY_SIZE {
+            let a = (y - strip) as f32 / (KEY_SIZE - strip) as f32 * 0.75;
             for x in 0..KEY_SIZE {
                 let p = canvas.get_pixel_mut(x, y);
                 for c in 0..3 {
@@ -118,7 +120,7 @@ fn draw_label(canvas: &mut RgbImage, label: &str, with_image: bool) {
 }
 
 /// Matches the editor preview (12 px on a 92 px tile).
-const CORNER_RADIUS: f32 = 13.0;
+const CORNER_RADIUS: f32 = 14.0;
 
 /// Fades pixels outside a rounded rectangle to black, anti-aliased with 4×4 supersampling.
 fn round_corners(img: &mut RgbImage, r: f32) {
@@ -177,7 +179,12 @@ pub fn render_key_jpeg(spec: &KeySpec) -> Vec<u8> {
         draw_label(&mut canvas, &spec.label, has_image);
     }
     round_corners(&mut canvas, CORNER_RADIUS);
-    let rotated = imageops::rotate180(&canvas);
+    encode_tile(&canvas)
+}
+
+/// 100×100 canvas as seen by the user → device JPEG (rotated 180°, baseline, JFIF).
+pub fn encode_tile(canvas: &RgbImage) -> Vec<u8> {
+    let rotated = imageops::rotate180(canvas);
     let mut jpeg = Vec::new();
     JpegEncoder::new_with_quality(&mut jpeg, 90)
         .encode_image(&rotated)
@@ -284,7 +291,8 @@ mod tests {
             assert!(!(w[0] == 0xFF && (0xD0..=0xD7).contains(&w[1])), "RST marker");
         }
         let img = image::load_from_memory(&j).unwrap();
-        assert_eq!((img.width(), img.height()), (100, 100));
+        // The D6 panel is 104×104 (measured on hardware with a magenta margin), not 100×100.
+        assert_eq!((img.width(), img.height()), (104, 104));
         assert!(j.len() < 0xFFFF);
     }
 
@@ -352,10 +360,10 @@ mod tests {
         let white = image::RgbImage::from_pixel(200, 200, Rgb([255, 255, 255]));
         let j = render_key_jpeg(&KeySpec { image: Some(png_of(&white.into())), label: String::new(), bg: [255, 255, 255] });
         let out = image::load_from_memory(&j).unwrap().to_rgb8();
-        for (x, y) in [(0, 0), (99, 0), (0, 99), (99, 99), (2, 2)] {
+        for (x, y) in [(0, 0), (103, 0), (0, 103), (103, 103), (2, 2)] {
             assert!(out.get_pixel(x, y)[0] < 40, "corner ({x},{y}) not black: {:?}", out.get_pixel(x, y));
         }
-        for (x, y) in [(50, 50), (50, 1), (1, 50), (50, 98)] {
+        for (x, y) in [(52, 52), (52, 1), (1, 52), (52, 102)] {
             assert!(out.get_pixel(x, y)[0] > 215, "edge/centre ({x},{y}) should keep the image: {:?}", out.get_pixel(x, y));
         }
     }
