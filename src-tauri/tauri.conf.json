@@ -39,17 +39,13 @@
     ],
     "publisher": "gerzyDECK",
     "copyright": "© 2026 gerzyDECK",
-    "shortDescription": "Software pro Fifine AmpliGame D6",
+    "shortDescription": "Unofficial software for the Fifine AmpliGame D6",
     "windows": {
       "nsis": {
         "languages": [
-          "Czech",
           "English"
         ],
-        "installMode": "currentUser",
-        "customLanguageFiles": {
-          "Czech": "nsis/Czech.nsh"
-        }
+        "installMode": "currentUser"
       }
     },
     "licenseFile": "LICENSE.txt",
