@@ -72,6 +72,10 @@ cargo run --bin boot_logo_replay -- image.png   # upload a boot logo
 - Windows does not let keys into windows running as administrator; the editor warns about it.
 - A key's display is 104×104 px; the boot logo is 800×480, laid out as a 5×3 grid of 160 px cells (one cell per key).
 
+## License
+
+The source code is released under the [MIT License](LICENSE). The installer additionally shows the terms of use and disclaimer in [`src-tauri/LICENSE.txt`](src-tauri/LICENSE.txt).
+
 ## Credits
 
 - Device protocol based on [fifine-ampligame-d6](https://github.com/micah1crandell/fifine-ampligame-d6) (MIT); the boot logo command was captured from the official app.
