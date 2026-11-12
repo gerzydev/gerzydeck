@@ -1,22 +1,12 @@
 {
   "name": "gerzys-deck",
-  "version": "0.1.0",
   "private": true,
-  "description": "Vlastní software pro Fifine AmpliGame D6",
-  "type": "module",
-  "engines": {
-    "node": ">=22"
-  },
   "scripts": {
-    "start": "node src/main.js",
-    "test": "node --test test/",
-    "diag": "node tools/diag.js",
-    "install-autostart": "node scripts/install-autostart.js"
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
   },
-  "dependencies": {
-    "koffi": "^3.3.7",
-    "node-hid": "^3.4.0",
-    "sharp": "^0.35.5",
-    "ws": "^8.22.2"
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4"
   }
 }

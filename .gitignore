@@ -1,2 +1,4 @@
 node_modules/
 .superpowers/
+src-tauri/target/
+src-tauri/gen/
