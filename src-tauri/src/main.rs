@@ -26,7 +26,10 @@ impl EventSink for TauriSink {
         if let Some(tray) = self.0.tray_by_id(TRAY_ID) {
             let status = if s.connected { "Připojeno" } else { "Nepřipojeno" };
             let tip: String = format!("Gerzy's deck — {status} · {}", s.active_profile_name).chars().take(63).collect();
-            let _ = tray.set_tooltip(Some(tip));
+            // set_tooltip waits for the main thread; never make the engine thread wait for it.
+            std::thread::spawn(move || {
+                let _ = tray.set_tooltip(Some(tip));
+            });
         }
     }
     fn config(&self, c: &Config) {
@@ -55,9 +58,19 @@ fn quit(app: &AppHandle) {
     if let Some(tx) = app.try_state::<EngineTx>() {
         let _ = tx.0.send(Msg::Shutdown);
     }
+    // Join the engine/device (releases held keys, puts the deck to sleep) off the main thread,
+    // and never wait longer than 3 s — "Ukončit" must always quit.
     if let Some(workers) = app.try_state::<Workers>() {
-        for h in workers.0.lock().unwrap().drain(..) {
-            let _ = h.join();
+        let handles: Vec<JoinHandle<()>> = workers.0.lock().unwrap().drain(..).collect();
+        let (done_tx, done_rx) = channel();
+        std::thread::spawn(move || {
+            for h in handles {
+                let _ = h.join();
+            }
+            let _ = done_tx.send(());
+        });
+        if done_rx.recv_timeout(Duration::from_secs(3)).is_err() {
+            log::warn!("shutdown timed out, exiting anyway");
         }
     }
     app.exit(0);

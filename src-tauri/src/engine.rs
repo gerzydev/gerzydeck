@@ -211,6 +211,12 @@ impl Engine {
         if self.previous_profile.as_deref().is_some_and(|p| !self.exists(p)) {
             self.previous_profile = None;
         }
+        Ok(self.config.clone())
+    }
+
+    /// Notifications and rendering after a config change. Runs after the caller got its reply,
+    /// because sinks may block (Tauri tray calls wait for the main thread).
+    fn after_config_change(&mut self) {
         self.sink.config(&self.config);
         if self.exists(&self.state.active_profile_id) {
             self.emit_state();
@@ -219,7 +225,6 @@ impl Engine {
             let target = decide_profile(&self.config, self.state.foreground_exe.as_deref(), &self.state.manual_profile_id);
             self.activate(target);
         }
-        Ok(self.config.clone())
     }
 
     /// Returns false on shutdown.
@@ -265,7 +270,11 @@ impl Engine {
             }
             Msg::SetConfig(raw, r) => {
                 let res = self.set_config(&raw);
+                let ok = res.is_ok();
                 let _ = r.send(res);
+                if ok {
+                    self.after_config_change();
+                }
             }
             Msg::SetActiveProfile(id) => self.set_active(id),
             Msg::SwitchProfile(id) => self.switch(id),
@@ -422,7 +431,9 @@ mod tests {
         fn set_config(&self, c: &Config) -> Result<Config, String> {
             let (r, rx) = channel();
             self.send(Msg::SetConfig(serde_json::to_value(c).unwrap(), r));
-            rx.recv_timeout(Duration::from_secs(2)).unwrap()
+            let res = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            self.state(); // notifications/rendering run after the reply
+            res
         }
     }
 
@@ -522,6 +533,46 @@ mod tests {
         t.state();
         assert!(t.kb.get().is_empty());
         assert!(t.sink.get().contains(&"raw 1 true".to_string()));
+    }
+
+    /// A sink that blocks (Tauri tray updates wait for the main thread, which may itself be
+    /// waiting for this reply) must not delay the reply: the editor showed "Jádro programu neodpovídá".
+    #[test]
+    fn set_config_replies_before_notifying_a_blocking_sink() {
+        struct BlockingSink(Arc<(Mutex<bool>, std::sync::Condvar)>);
+        impl EventSink for BlockingSink {
+            fn state(&self, _: &State) {
+                let (lock, cv) = &*self.0;
+                let mut released = lock.lock().unwrap();
+                while !*released {
+                    released = cv.wait(released).unwrap();
+                }
+            }
+            fn config(&self, _: &Config) {}
+            fn key(&self, _: u8, _: bool) {}
+            fn raw(&self, _: u8, _: bool) {}
+        }
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let dir = std::env::temp_dir().join(format!("deck-engine-{}", new_id()));
+        let store = Store::new(dir);
+        store.save(&seed()).unwrap();
+        let (dtx, _drx) = channel();
+        let (tx, _h) = spawn_engine(EngineDeps {
+            store,
+            device_tx: dtx,
+            keyboard: Arc::new(FakeKb(Rec::default())),
+            launch: Arc::new(|_: &str, _: &[String]| {}),
+            system: Arc::new(|_: &str| {}),
+            sink: Box::new(BlockingSink(gate.clone())),
+            render,
+        });
+        let (r, rx) = channel();
+        tx.send(Msg::SetConfig(serde_json::to_value(seed()).unwrap(), r)).unwrap();
+        let reply = rx.recv_timeout(Duration::from_secs(2));
+        let (lock, cv) = &*gate;
+        *lock.lock().unwrap() = true;
+        cv.notify_all();
+        assert!(reply.expect("engine did not reply while the sink was blocked").is_ok());
     }
 
     #[test]

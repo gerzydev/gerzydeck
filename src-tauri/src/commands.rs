@@ -1,4 +1,6 @@
 //! Tauri commands: thin wrappers that turn editor calls into engine messages.
+//! All waiting commands are `async`: sync Tauri commands run on the main thread, and
+//! blocking it while the engine talks to the tray deadlocked every save for 5 s.
 
 use crate::config::Config;
 use crate::engine::{Msg, State};
@@ -21,33 +23,33 @@ fn tell(tx: &EngineTx, msg: Msg) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_config(tx: tauri::State<'_, EngineTx>) -> Result<Config, String> {
+pub async fn get_config(tx: tauri::State<'_, EngineTx>) -> Result<Config, String> {
     ask(&tx, Msg::GetConfig)
 }
 
 #[tauri::command]
-pub fn get_state(tx: tauri::State<'_, EngineTx>) -> Result<State, String> {
+pub async fn get_state(tx: tauri::State<'_, EngineTx>) -> Result<State, String> {
     ask(&tx, Msg::GetState)
 }
 
 #[tauri::command]
-pub fn set_config(tx: tauri::State<'_, EngineTx>, config: serde_json::Value) -> Result<Config, String> {
+pub async fn set_config(tx: tauri::State<'_, EngineTx>, config: serde_json::Value) -> Result<Config, String> {
     ask(&tx, |r| Msg::SetConfig(config, r))?
 }
 
 #[tauri::command]
-pub fn set_active_profile(tx: tauri::State<'_, EngineTx>, id: String) -> Result<(), String> {
+pub async fn set_active_profile(tx: tauri::State<'_, EngineTx>, id: String) -> Result<(), String> {
     tell(&tx, Msg::SetActiveProfile(id))
 }
 
 #[tauri::command]
-pub fn set_calibrating(tx: tauri::State<'_, EngineTx>, on: bool) -> Result<(), String> {
+pub async fn set_calibrating(tx: tauri::State<'_, EngineTx>, on: bool) -> Result<(), String> {
     tell(&tx, Msg::SetCalibrating(on))
 }
 
 /// Raw body: `invoke('import_image', uint8Array)`.
 #[tauri::command]
-pub fn import_image(tx: tauri::State<'_, EngineTx>, request: Request<'_>) -> Result<String, String> {
+pub async fn import_image(tx: tauri::State<'_, EngineTx>, request: Request<'_>) -> Result<String, String> {
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err("Očekávám data obrázku".into());
     };
@@ -56,13 +58,13 @@ pub fn import_image(tx: tauri::State<'_, EngineTx>, request: Request<'_>) -> Res
 }
 
 #[tauri::command]
-pub fn image_data_url(id: String) -> Option<String> {
+pub async fn image_data_url(id: String) -> Option<String> {
     let png = crate::store::Store::new(crate::store::data_dir()).read_image(&id)?;
     Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
 }
 
 #[tauri::command]
-pub fn list_processes() -> Vec<String> {
+pub async fn list_processes() -> Vec<String> {
     crate::os::list_process_names()
 }
 
@@ -72,12 +74,12 @@ pub fn list_scancodes() -> Vec<&'static str> {
 }
 
 #[tauri::command]
-pub fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
+pub async fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn set_autostart(app: tauri::AppHandle, on: bool) -> Result<(), String> {
+pub async fn set_autostart(app: tauri::AppHandle, on: bool) -> Result<(), String> {
     let al = app.autolaunch();
     if on { al.enable() } else { al.disable() }.map_err(|e| e.to_string())
 }
