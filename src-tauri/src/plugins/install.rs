@@ -151,17 +151,20 @@ pub fn install_from_zip(
         }
         paths.push(path);
     }
-    let mut manifests = paths
+    let manifests: Vec<_> = paths
         .iter()
-        .enumerate()
-        .filter(|(_, p)| p.file_name().is_some_and(|s| s == "manifest.json"));
-    let (_, manifest_path) = manifests
-        .next()
+        .filter(|p| p.file_name().is_some_and(|s| s == "manifest.json"))
+        .collect();
+    // A dependency may have its own manifest.json. The shallowest manifest
+    // defines the plugin root; every other manifest must be inside that root.
+    let manifest_path = manifests
+        .iter()
+        .min_by_key(|p| p.components().count())
         .ok_or_else(|| invalid("archiv neobsahuje manifest.json"))?;
-    if manifests.next().is_some() {
-        return Err(invalid("archiv obsahuje více manifestů pluginu"));
-    }
     let prefix = manifest_path.parent().unwrap_or(Path::new(""));
+    if manifests.iter().any(|p| !p.starts_with(prefix)) {
+        return Err(invalid("archiv obsahuje více kořenových manifestů pluginu"));
+    }
     let wrapped = prefix.components().count() == 1
         && prefix
             .file_name()
@@ -489,5 +492,25 @@ mod tests {
         )
         .is_err());
         fs::remove_dir_all(p).unwrap();
+    }
+    #[test]
+    fn nested_dependency_manifests_are_regular_files() {
+        for prefix in ["test.id.sdPlugin/", "", "release/"] {
+            let p = root();
+            // Dependency intentionally precedes the plugin manifest in the ZIP.
+            let dependency = format!("{prefix}dependency/manifest.json");
+            let manifest = format!("{prefix}manifest.json");
+            let plugin = install_from_zip(
+                &archive(&[(&dependency, "{}"), (&manifest, MANIFEST)]),
+                &p,
+                Some("test.id"),
+            )
+            .unwrap();
+            assert_eq!(
+                fs::read_to_string(plugin.dir.join("dependency/manifest.json")).unwrap(),
+                "{}"
+            );
+            fs::remove_dir_all(p).unwrap();
+        }
     }
 }
