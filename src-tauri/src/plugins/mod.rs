@@ -3,3 +3,4 @@
 pub mod manifest;
 pub mod catalog;
 pub mod install;
+pub mod image;
