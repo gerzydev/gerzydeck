@@ -1,6 +1,7 @@
 // Gerzy's deck — editor. Talks to the Rust core via Tauri invoke/listen.
 import { TEMPLATES, sameAction } from './templates.js';
 import { ICONS, iconById, rasterizeIcon } from './icons.js';
+import { renderPluginsPage, loadInstalled, pluginActionFields, pickPluginAction, closePi, pluginAction } from './plugins.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -10,7 +11,7 @@ const TEXT_NOTE = 'Psaní textu funguje v běžných aplikacích, hry ho mohou i
 
 const ACTION_TYPES = [
   ['none', 'Nic'], ['keys', 'Klávesa / zkratka'], ['macro', 'Makro'], ['launch', 'Spustit program / web'],
-  ['media', 'Média a hlasitost'], ['system', 'Systém'], ['profile', 'Přepnout profil'],
+  ['media', 'Média a hlasitost'], ['system', 'Systém'], ['profile', 'Přepnout profil'], ['plugin', 'Plugin…'],
 ];
 const MEDIA = [['playpause', 'Přehrát / pauza'], ['next', 'Další skladba'], ['prev', 'Předchozí skladba'], ['mute', 'Ztlumit zvuk'], ['volup', 'Hlasitost +'], ['voldown', 'Hlasitost −']];
 const SYSTEM = [['lock', 'Zamknout PC'], ['sleep', 'Uspat PC']];
@@ -27,6 +28,7 @@ const NAMES = {
 };
 const PAGES = {
   deck: ['Deck', 'Klikni na tlačítko a nastav mu obrázek a akci. Změny se ukládají hned.'],
+  plugins: ['Pluginy', 'Pluginy pro Stream Deck: OBS, Spotify, Discord, PC metriky a stovky dalších.'],
   profiles: ['Profily', 'Každý profil má vlastních 15 tlačítek. Profil se může přepnout sám podle programu v popředí.'],
   settings: ['Nastavení', 'Jas, spouštění s Windows a kalibrace tlačítek.'],
 };
@@ -101,6 +103,7 @@ function actionSummary(a) {
     case 'launch': return `Spustit ${a.target}`;
     case 'media': return MEDIA.find(([v]) => v === a.command)?.[1] ?? 'Média';
     case 'system': return SYSTEM.find(([v]) => v === a.command)?.[1] ?? 'Systém';
+    case 'plugin': return pluginAction(a.plugin, a.action).action?.name ?? 'Plugin';
     case 'profile': return a.profileId === '__back' ? 'Předchozí profil' : `Profil: ${config.profiles.find((p) => p.id === a.profileId)?.name ?? '?'}`;
     default: return 'Bez akce';
   }
@@ -126,7 +129,10 @@ function fillTile(btn, cfg, k) {
     btn.append(img);
     if (cfg.label) btn.append(h('span', { class: 'shade' }));
   }
-  if (cfg.label) btn.append(h('span', { class: `lbl ${cfg.image ? 'bottom' : 'center'}` }, cfg.label));
+  const pa = cfg.action?.type === 'plugin' && !cfg.image ? pluginAction(cfg.action.plugin, cfg.action.action) : null;
+  if (pa?.action?.icon) btn.append(h('img', { class: 'act-icon', src: pa.action.icon, alt: '' }));
+  if (pa && !pa.plugin) btn.append(h('span', { class: 'lbl center' }, '⚠'));
+  if (cfg.label) btn.append(h('span', { class: `lbl ${cfg.image || pa?.action?.icon ? 'bottom' : 'center'}` }, cfg.label));
   btn.append(h('span', { class: 'num' }, k));
 }
 
@@ -157,6 +163,7 @@ function renderBanners() {
 }
 
 function setPage(p) {
+  if (p !== 'deck') closePi(ui);
   page = p;
   for (const btn of document.querySelectorAll('#nav .rm-nav-item')) btn.classList.toggle('active', btn.dataset.page === p);
   for (const id of Object.keys(PAGES)) $(`page-${id}`).hidden = id !== p;
@@ -167,6 +174,7 @@ function setPage(p) {
 
 function renderPage() {
   if (page === 'deck') renderDeck();
+  else if (page === 'plugins') renderPluginsPage(ui, $('page-plugins'));
   else if (page === 'profiles') renderProfiles();
   else renderSettings();
 }
@@ -175,7 +183,7 @@ function renderPage() {
 function renderDeck() {
   const grid = h('div', { class: 'deck-grid' });
   for (let k = 1; k <= 15; k++) {
-    grid.append(keyTile(k, { onclick: () => { selectedKey = k; showTemplates = false; showIcons = false; renderDeck(); } }));
+    grid.append(keyTile(k, { onclick: () => { if (k !== selectedKey) closePi(ui); selectedKey = k; showTemplates = false; showIcons = false; renderDeck(); } }));
   }
   grid.querySelector(`[data-key="${selectedKey}"]`)?.classList.add('selected');
   const board = h('div', { class: 'deck-board' }, grid, h('div', { class: 'deck-caption' }, `Profil „${activeProfile().name}“ — rozložení jako na decku`));
@@ -189,7 +197,7 @@ function renderEditor() {
   const hintBox = h('div');
 
   const redrawAction = () => {
-    actionBox.replaceChildren(...actionFields(cfg, () => { refreshTile(k); redrawHint(); save(); }, redrawAction));
+    actionBox.replaceChildren(...actionFields(cfg, () => { refreshTile(k); redrawHint(); save(); }, redrawAction, k));
     redrawHint();
   };
   const redrawHint = () => {
@@ -258,7 +266,17 @@ function renderEditor() {
         h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Pozadí'),
           h('input', { class: 'rm-color', type: 'color', value: cfg.bg, oninput: (e) => { cfg.bg = e.target.value; refreshTile(k); save(); } }))),
       h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Akce'),
-        h('select', { class: 'rm-select', onchange: (e) => { cfg.action = defaultAction(e.target.value); save(); refreshTile(k); redrawAction(); } },
+        h('select', { class: 'rm-select', onchange: async (e) => {
+          if (e.target.value === 'plugin') {
+            const pick = await pickPluginAction(ui);
+            if (!pick) { e.target.value = cfg.action.type; return; }
+            cfg.action = { type: 'plugin', plugin: pick.plugin, action: pick.action, settings: {}, state: 0 };
+            save(); renderDeck();
+            return;
+          }
+          closePi(ui);
+          cfg.action = defaultAction(e.target.value); save(); refreshTile(k); redrawAction();
+        } },
           ACTION_TYPES.map(([v, l]) => option(v, l, cfg.action.type)))),
       actionBox,
       hintBox));
@@ -302,9 +320,11 @@ function splitArgs(s) {
 }
 const joinArgs = (args) => args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ');
 
-function actionFields(cfg, changed, redraw) {
+function actionFields(cfg, changed, redraw, k) {
   const a = cfg.action;
   switch (a.type) {
+    case 'plugin':
+      return pluginActionFields(ui, activeProfile().id, k, cfg, (rerender) => { save(); if (rerender) renderDeck(); else changed(); });
     case 'keys': {
       const recBtn = h('button', { class: 'rm-btn is-sm', type: 'button' }, 'Nahrát zkratku');
       recBtn.onclick = () => {
@@ -565,6 +585,8 @@ function applyTheme(choice) {
 }
 
 // ---------- boot ----------
+const ui = { h, invoke, toast, svgIcon, save: () => save(), renderDeck: () => renderDeck() };
+
 async function boot() {
   let theme = 'auto';
   try { theme = localStorage.getItem('deck-theme') ?? 'auto'; } catch { /* ignore */ }
@@ -585,6 +607,7 @@ async function boot() {
   }
   // a reload must not leave the core stuck in calibration mode
   invoke('set_calibrating', { on: false }).catch(() => {});
+  loadInstalled(ui).then(() => { if (page === 'deck') renderDeck(); });
   invoke('get_autostart').then((v) => { autostart = v; if (page === 'settings') renderSettings(); }).catch(() => {});
   renderSidebar();
   renderBanners();
