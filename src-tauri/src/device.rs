@@ -260,6 +260,8 @@ impl<B: HidBackend> Worker<B> {
                 if let Some((jpeg, reply)) = logo.take() {
                     match self.write_boot_logo(&mut *port, &jpeg) {
                         Ok(()) => {
+                            // like a fresh plug-in: wake the panel again, then the engine redraws every key
+                            queue.extend(protocol::init_sequence(self.opts.brightness));
                             let _ = reply.send(Ok(()));
                             let _ = self.events.send(DeviceEvent::Redraw);
                         }
