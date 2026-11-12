@@ -34,6 +34,12 @@ anyhow = "1"
 log = "0.4"
 simplelog = "0.12"
 base64 = "0.22"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "process", "io-util"] }
+tokio-tungstenite = "0.30"
+futures-util = "0.3"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+resvg = "0.50"
 
 [dependencies.windows]
 version = "0.62"
@@ -47,6 +53,7 @@ features = [
   "Win32_Security",
   "Win32_System_Shutdown",
   "Win32_System_Power",
+  "Win32_System_JobObjects",
 ]
 
 [profile.release]
