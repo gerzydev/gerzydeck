@@ -44,6 +44,8 @@ pub enum HostCmd {
     Reload { id: String },
     /// stop and forget a plugin (before uninstall)
     Remove { id: String },
+    /// status reported by the process supervisor (crashed, missing Node.js, …)
+    SetStatus { id: String, status: PluginStatus },
     Shutdown,
 }
 

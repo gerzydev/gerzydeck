@@ -285,6 +285,11 @@ impl Host {
                     }
                 }
             }
+            HostCmd::SetStatus { id, status } => {
+                if self.plugins.contains_key(&id) {
+                    self.set_status(&id, status);
+                }
+            }
             HostCmd::Remove { id } => {
                 self.stop_plugin(&id);
                 self.emit(PluginEvent::Status { plugin: id, status: PluginStatus::NotInstalled });

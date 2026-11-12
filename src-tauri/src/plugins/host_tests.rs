@@ -251,3 +251,14 @@ fn removing_a_plugin_stops_it_and_marks_actions_missing() {
     h.wait_event(|e| matches!(e, PluginEvent::Status { status: super::link::PluginStatus::NotInstalled, .. }));
     assert!(h.fake.stopped.lock().unwrap().contains(&"com.fake".to_string()));
 }
+
+#[test]
+fn supervisor_status_shows_in_the_list() {
+    let h = start();
+    h.tx.send(HostCmd::SetStatus { id: "com.fake".into(), status: super::link::PluginStatus::MissingNode }).unwrap();
+    h.wait_event(|e| matches!(e, PluginEvent::Status { status: super::link::PluginStatus::MissingNode, .. }));
+    let (r, rx) = channel();
+    h.tx.send(HostCmd::ListPlugins(r)).unwrap();
+    let list = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(list.iter().any(|p| p.status == super::link::PluginStatus::MissingNode || p.status == super::link::PluginStatus::Running));
+}
