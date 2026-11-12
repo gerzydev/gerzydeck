@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0c0d0f">
+    <title>Gerzy's remapper</title>
+    <script>
+        try { const t = localStorage.getItem("rm-theme"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch (e) { }
+    </script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3" crossorigin="anonymous">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="theme.css?v=5" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.min.js" integrity="sha384-QJHtvGhmr9XOIpI6YVutG+2QOK9T+ZnN4kzFN1RtK3zEFEIsxhlmWl5/YESvpZ13" crossorigin="anonymous"></script>
+    <script src="code.js" type="module"></script>
+    <script src="ui.js" defer></script>
+    <script src="mouse.js?v=3" defer></script>
+</head>
+
+<body>
+
+    <div class="rm-shell">
+
+        <aside class="rm-sidebar">
+            <div class="rm-brand">
+                <span class="rm-brand-mark">
+                    <svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 6.5v3.5"/></svg>
+                </span>
+                <span class="rm-brand-text">
+                    <span class="rm-brand-name">Gerzy's remapper</span>
+                    <span class="rm-brand-build">Configuration</span>
+                </span>
+            </div>
+
+            <nav class="nav rm-nav" id="nav-tab" role="tablist">
+                <button class="nav-link rm-nav-item active" id="nav-mappings-tab" data-bs-toggle="tab" data-bs-target="#nav-mappings" type="button" role="tab" data-sub="Route inputs from your device to outputs, per layer.">
+                    <svg viewBox="0 0 24 24"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></svg>
+                    <span>Mappings</span>
+                </button>
+                <button class="nav-link rm-nav-item" id="nav-mouse-tab" data-bs-toggle="tab" data-bs-target="#nav-mouse" type="button" role="tab" data-sub="Battery, sensor and firmware of the Logitech mouse behind HID Remapper.">
+                    <svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 6.5v3.5"/></svg>
+                    <span>Mouse</span>
+                </button>
+                <button class="nav-link rm-nav-item" id="nav-settings-tab" data-bs-toggle="tab" data-bs-target="#nav-settings" type="button" role="tab" data-sub="Global behaviour, emulated device and custom usages.">
+                    <svg viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></svg>
+                    <span>Settings</span>
+                </button>
+                <button class="nav-link rm-nav-item" id="nav-macros-tab" data-bs-toggle="tab" data-bs-target="#nav-macros" type="button" role="tab" data-sub="Sequences of key and button presses.">
+                    <svg viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+                    <span>Macros</span>
+                </button>
+                <button class="nav-link rm-nav-item" id="nav-expressions-tab" data-bs-toggle="tab" data-bs-target="#nav-expressions" type="button" role="tab" data-sub="Stack-based programs evaluated every millisecond.">
+                    <svg viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>
+                    <span>Expressions</span>
+                </button>
+                <button class="nav-link rm-nav-item" id="nav-actions-tab" data-bs-toggle="tab" data-bs-target="#nav-actions" type="button" role="tab" data-sub="Import, export and firmware tools.">
+                    <svg viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
+                    <span>Actions</span>
+                </button>
+                <button class="nav-link rm-nav-item" id="nav-monitor-tab" data-bs-toggle="tab" data-bs-target="#nav-monitor" type="button" role="tab" data-sub="Live view of the usages your connected device generates.">
+                    <svg viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+                    <span>Monitor</span>
+                </button>
+                <button class="nav-link rm-nav-item" id="nav-examples-tab" data-bs-toggle="tab" data-bs-target="#nav-examples" type="button" role="tab" data-sub="Ready-made configurations to start from.">
+                    <svg viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+                    <span>Examples</span>
+                </button>
+            </nav>
+
+            <div class="rm-side-device">
+                <div class="rm-side-heading">Device</div>
+                <div class="rm-device-card" id="rm-device-card">
+                    <span class="rm-device-art">
+                        <svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 6.5v3.5"/></svg>
+                        <i class="rm-device-live"></i>
+                    </span>
+                    <span class="rm-device-text">
+                        <span class="rm-device-name" id="rm-device-name">Not connected</span>
+                        <span class="rm-device-sub" id="rm-device-sub">Click “Open device”</span>
+                    </span>
+                </div>
+            </div>
+
+            <div class="rm-sidebar-foot">
+                <div class="rm-theme-switch" id="rm-theme-switch" role="group" aria-label="Color mode">
+                    <button type="button" data-theme-value="auto">Auto</button>
+                    <button type="button" data-theme-value="dark">Dark</button>
+                    <button type="button" data-theme-value="light">Light</button>
+                </div>
+            </div>
+        </aside>
+
+        <main class="rm-main">
+
+            <header class="rm-topbar">
+                <div class="rm-title">
+                    <h1 id="rm-page-title">Mappings</h1>
+                    <p id="rm-page-sub">Route inputs from your device to outputs, per layer.</p>
+                </div>
+                <div class="rm-actions">
+                    <button id="open_device" type="button" class="btn rm-btn is-primary">
+                        <svg viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>
+                        <span>Open device</span>
+                    </button>
+                    <button id="load_from_device" type="button" class="btn rm-btn">
+                        <svg viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>
+                        <span>Load from device</span>
+                    </button>
+                    <button id="save_to_device" type="button" class="btn rm-btn position-relative">
+                        <span id="save_to_device_checkmark" class="rm-saved-badge hub_port_badge d-none">&check;</span>
+                        <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+                        <span>Save to device</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="rm-content">
+
+                <div id="error" class="alert alert-danger d-none"></div>
+
+                <div class="tab-content">
+
+                    <div class="tab-pane active" id="nav-mappings" role="tabpanel" tabindex="0">
+
+                        <section class="rm-panel">
+                            <div class="rm-mappings-scroll">
+                                <div class="rm-mappings-inner">
+                                    <div class="row rm-mappings-head align-items-end">
+                                        <div class="col-1"></div>
+                                        <div class="col-3 text-center"><a href="#" id="input-column-header" class="d-block">Input</a></div>
+                                        <div class="col-3 text-center"><a href="#" id="output-column-header" class="d-block">Output</a></div>
+                                        <div class="col-3">
+                                            <div class="d-flex align-items-end">
+                                                <div class="flex-fill text-center"><a href="#" id="layer-column-header" class="d-block">Layer</a></div>
+                                                <div class="rm-flags-head" title="Sticky / Tap / Hold">S T H</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-2 text-center">Scaling</div>
+                                    </div>
+
+                                    <div id="mappings">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="rm-panel-foot">
+                                <button id="add_mapping" type="button" class="btn rm-btn">
+                                    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                                    <span>Add mapping</span>
+                                </button>
+                                <span class="rm-meta">Click a column header to sort.</span>
+                            </div>
+                        </section>
+
+                    </div>
+
+                    <div class="tab-pane" id="nav-mouse" role="tabpanel" tabindex="0">
+                        <div id="rm-mouse">
+                            <div class="rm-mouse-bar">
+                                <span class="rm-meta" id="rm-mouse-status"></span>
+                                <div class="rm-end">
+                                    <button id="rm-mouse-connect" type="button" class="btn rm-btn is-sm">Connect</button>
+                                    <button id="rm-mouse-refresh" type="button" class="btn rm-btn is-sm">Refresh</button>
+                                </div>
+                            </div>
+                            <p class="rm-mouse-message d-none" id="rm-mouse-message"></p>
+                            <div class="rm-cards d-none" id="rm-mouse-grid">
+                                <section class="rm-panel rm-card">
+                                    <div class="rm-panel-head"><h2>Battery</h2></div>
+                                    <div class="rm-panel-body" id="rm-mouse-battery"></div>
+                                </section>
+                                <section class="rm-panel rm-card">
+                                    <div class="rm-panel-head"><h2>Sensor</h2></div>
+                                    <div class="rm-panel-body" id="rm-mouse-sensor"></div>
+                                </section>
+                                <section class="rm-panel rm-card">
+                                    <div class="rm-panel-head"><h2>Device</h2></div>
+                                    <div class="rm-panel-body" id="rm-mouse-device"></div>
+                                </section>
+                                <section class="rm-panel rm-card rm-card-wide d-none" id="rm-mouse-dpi-card">
+                                    <div class="rm-panel-head"><h2 id="rm-mouse-dpi-title">DPI stages</h2></div>
+                                    <div class="rm-panel-body" id="rm-mouse-dpi"></div>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="nav-settings" role="tabpanel" tabindex="0">
+
+                        <section class="rm-panel">
+                            <div class="rm-panel-head">
+                                <h2>General</h2>
+                            </div>
+                            <ul class="rm-kv">
+                                <li>
+                                    <span>Unmapped inputs passthrough on layer</span>
+                                    <div class="rm-layer-checks">
+                                        <div class="form-check form-check-inline">
+                                            <input type="checkbox" id="unmapped_passthrough_checkbox0" class="form-check-input">
+                                            <label for="unmapped_passthrough_checkbox0" class="form-check-label">0</label>
+                                        </div>
+                                        <div class="form-check form-check-inline">
+                                            <input type="checkbox" id="unmapped_passthrough_checkbox1" class="form-check-input">
+                                            <label for="unmapped_passthrough_checkbox1" class="form-check-label">1</label>
+                                        </div>
+                                        <div class="form-check form-check-inline">
+                                            <input type="checkbox" id="unmapped_passthrough_checkbox2" class="form-check-input">
+                                            <label for="unmapped_passthrough_checkbox2" class="form-check-label">2</label>
+                                        </div>
+                                        <div class="form-check form-check-inline">
+                                            <input type="checkbox" id="unmapped_passthrough_checkbox3" class="form-check-input">
+                                            <label for="unmapped_passthrough_checkbox3" class="form-check-label">3</label>
+                                        </div>
+                                        <div class="form-check form-check-inline d-none">
+                                            <input type="checkbox" id="unmapped_passthrough_checkbox4" class="form-check-input">
+                                            <label for="unmapped_passthrough_checkbox4" class="form-check-label">4</label>
+                                        </div>
+                                        <div class="form-check form-check-inline d-none">
+                                            <input type="checkbox" id="unmapped_passthrough_checkbox5" class="form-check-input">
+                                            <label for="unmapped_passthrough_checkbox5" class="form-check-label">5</label>
+                                        </div>
+                                        <div class="form-check form-check-inline d-none">
+                                            <input type="checkbox" id="unmapped_passthrough_checkbox6" class="form-check-input">
+                                            <label for="unmapped_passthrough_checkbox6" class="form-check-label">6</label>
+                                        </div>
+                                        <div class="form-check form-check-inline d-none">
+                                            <input type="checkbox" id="unmapped_passthrough_checkbox7" class="form-check-input">
+                                            <label for="unmapped_passthrough_checkbox7" class="form-check-label">7</label>
+                                        </div>
+                                    </div>
+                                </li>
+                                <li>
+                                    <label for="partial_scroll_timeout_input">Partial scroll timeout</label>
+                                    <div class="input-group rm-num">
+                                        <input type="number" id="partial_scroll_timeout_input" class="form-control text-end">
+                                        <span class="input-group-text">ms</span>
+                                    </div>
+                                </li>
+                                <li>
+                                    <label for="tap_hold_threshold_input">Tap-hold threshold</label>
+                                    <div class="input-group rm-num">
+                                        <input type="number" id="tap_hold_threshold_input" class="form-control text-end">
+                                        <span class="input-group-text">ms</span>
+                                    </div>
+                                </li>
+                                <li>
+                                    <label for="gpio_debounce_time_input">GPIO debounce time</label>
+                                    <div class="input-group rm-num">
+                                        <input type="number" id="gpio_debounce_time_input" class="form-control text-end">
+                                        <span class="input-group-text">ms</span>
+                                    </div>
+                                </li>
+                                <li>
+                                    <label for="macro_entry_duration_input">Macro step duration</label>
+                                    <div class="input-group rm-num">
+                                        <input type="number" min="1" max="256" id="macro_entry_duration_input" class="form-control text-end">
+                                        <span class="input-group-text">ms</span>
+                                    </div>
+                                </li>
+                                <li>
+                                    <label for="interval_override_dropdown">Override polling rate</label>
+                                    <select class="form-select rm-select" id="interval_override_dropdown">
+                                        <option value="0">don't override</option>
+                                        <option value="16">62.5 Hz</option>
+                                        <option value="8">125 Hz</option>
+                                        <option value="4">250 Hz</option>
+                                        <option value="2">500 Hz</option>
+                                        <option value="1">1000 Hz</option>
+                                    </select>
+                                </li>
+                                <li>
+                                    <label for="our_descriptor_number_dropdown">Emulated device type</label>
+                                    <select class="form-select rm-select" id="our_descriptor_number_dropdown">
+                                        <option value="0">Mouse and keyboard</option>
+                                        <option value="1">Absolute mouse and keyboard</option>
+                                        <option value="2">Switch gamepad</option>
+                                        <option value="3">PS4 arcade stick</option>
+                                        <option value="4">Stadia controller</option>
+                                        <option value="5">XAC/Flex compatible</option>
+                                    </select>
+                                </li>
+                                <li>
+                                    <label for="input_labels_dropdown">Input labels</label>
+                                    <select class="form-select rm-select" id="input_labels_dropdown">
+                                        <option value="0">mouse</option>
+                                        <option value="1">gamepad</option>
+                                    </select>
+                                </li>
+                                <li>
+                                    <label for="gpio_output_mode_dropdown">GPIO output mode</label>
+                                    <select class="form-select rm-select" id="gpio_output_mode_dropdown">
+                                        <option value="0">0=low, 1=high</option>
+                                        <option value="1">0=high impedance, 1=low</option>
+                                    </select>
+                                </li>
+                                <li>
+                                    <label for="ignore_auth_dev_inputs_checkbox">Ignore auth device inputs</label>
+                                    <div class="form-check form-switch m-0">
+                                        <input type="checkbox" id="ignore_auth_dev_inputs_checkbox" class="form-check-input" role="switch">
+                                    </div>
+                                </li>
+                                <li>
+                                    <label for="normalize_gamepad_inputs_checkbox">Normalize gamepad inputs</label>
+                                    <div class="form-check form-switch m-0">
+                                        <input type="checkbox" id="normalize_gamepad_inputs_checkbox" class="form-check-input" role="switch">
+                                    </div>
+                                </li>
+                            </ul>
+                            <div class="rm-panel-foot rm-notes">
+                                <p>Changes to the emulated device type become active after disconnecting and reconnecting HID Remapper.</p>
+                                <p>Changes to gamepad input normalization are applied after re-plugging the device or HID Remapper.</p>
+                            </div>
+                        </section>
+
+                        <section class="rm-panel mt-3">
+                            <div class="rm-panel-head">
+                                <h2>Custom usages</h2>
+                            </div>
+                            <div class="rm-panel-body">
+                                <div id="quirks_container"></div>
+                            </div>
+                            <div class="rm-panel-foot rm-notes">
+                                <button id="add_quirk" type="button" class="btn rm-btn">
+                                    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                                    <span>Add usage</span>
+                                </button>
+                                <p>If both Vendor ID and Product ID are zero, usage applies to all interfaces on all devices.
+                                    Set size to zero to remove an existing usage.
+                                    Custom usages are only applied after re-plugging the device or HID Remapper.</p>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div class="tab-pane" id="nav-macros" role="tabpanel" tabindex="0">
+
+                        <div class="accordion rm-accordion" id="macros_container">
+                        </div>
+
+                    </div>
+
+                    <div class="tab-pane" id="nav-expressions" role="tabpanel" tabindex="0">
+
+                        <section class="rm-panel">
+                            <div class="rm-panel-body pt-3" id="expressions_container">
+                            </div>
+                            <div class="rm-panel-foot rm-notes">
+                                <p>Expression <code>/* comments */</code> are not saved to device, but they are preserved in exported JSON files.
+                                    This build also supports <code>x random</code> &rarr; random value in [0, x).</p>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div class="tab-pane" id="nav-actions" role="tabpanel" tabindex="0">
+
+                        <div class="rm-cards">
+                            <section class="rm-panel rm-card">
+                                <div class="rm-panel-head">
+                                    <h2>Configuration file</h2>
+                                </div>
+                                <p class="rm-card-text">Save the current configuration as JSON or load one from disk.</p>
+                                <div class="rm-card-actions">
+                                    <button id="download_json" type="button" class="btn rm-btn">Export JSON</button>
+                                    <button id="upload_json" type="button" class="btn rm-btn">Import JSON</button>
+                                </div>
+                            </section>
+
+                            <section class="rm-panel rm-card">
+                                <div class="rm-panel-head">
+                                    <h2>Firmware</h2>
+                                </div>
+                                <p class="rm-card-text">Reboot HID Remapper into its bootloader to flash a new firmware.</p>
+                                <div class="rm-card-actions">
+                                    <button id="flash_firmware" type="button" class="btn rm-btn">Flash firmware</button>
+                                    <span id="flash_b_side_container">
+                                        <button id="flash_b_side" type="button" class="btn rm-btn">Flash B side</button>
+                                    </span>
+                                </div>
+                            </section>
+
+                            <section class="rm-panel rm-card">
+                                <div class="rm-panel-head">
+                                    <h2>Bluetooth</h2>
+                                </div>
+                                <p class="rm-card-text">Only available on the Bluetooth version of HID Remapper.</p>
+                                <div class="rm-card-actions">
+                                    <span class="d-none" id="pair_new_device_container">
+                                        <button id="pair_new_device" type="button" class="btn rm-btn">Pair new device</button>
+                                    </span>
+                                    <span class="d-none" id="clear_bonds_container">
+                                        <button id="clear_bonds" type="button" class="btn rm-btn is-danger">Forget all devices</button>
+                                    </span>
+                                </div>
+                            </section>
+                        </div>
+
+                    </div>
+
+                    <div class="tab-pane" id="nav-monitor" role="tabpanel" tabindex="0">
+
+                        <section class="rm-panel">
+                            <div class="rm-panel-head">
+                                <h2>Live inputs</h2>
+                                <span class="rm-meta">Interact with the device connected to HID Remapper to see what usage codes it generates.</span>
+                                <div class="rm-end">
+                                    <button id="monitor_clear" type="button" class="btn rm-btn is-sm">Clear</button>
+                                </div>
+                            </div>
+                            <div class="rm-panel-body">
+                                <div id="monitor_header" class="row rm-monitor-head d-none">
+                                    <div class="col-1 text-center"></div>
+                                    <div class="col-2 text-center monitor_usage">Usage</div>
+                                    <div class="col-3 text-center monitor_readable_name"></div>
+                                    <div class="col-2 text-end monitor_last_value">Last value</div>
+                                    <div class="col-2 text-end monitor_min_value">Min value</div>
+                                    <div class="col-2 text-end monitor_max_value">Max value</div>
+                                </div>
+
+                                <div id="monitor_container">
+                                </div>
+                            </div>
+                        </section>
+
+                    </div>
+
+                    <div class="tab-pane" id="nav-examples" role="tabpanel" tabindex="0">
+
+                        <section class="rm-panel">
+                            <ul id="examples" class="list-group rm-examples">
+                            </ul>
+                        </section>
+
+                    </div>
+
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <template id="mapping_template">
+        <div class="row mapping_container">
+            <div class="col-1"><button type="button" class="btn rm-icon-btn delete_button" title="Delete mapping">×</button></div>
+            <div class="col-3">
+                <button type="button" class="btn rm-key w-100 source_button position-relative">
+                    <span class="position-absolute top-50 start-0 translate-middle badge bg-info rounded-pill hub_port_badge">0</span>
+                    <span class="button_label">source</span>
+                </button>
+            </div>
+            <div class="col-3">
+                <button type="button" class="btn rm-key w-100 target_button position-relative">
+                    <span class="position-absolute top-50 start-0 translate-middle badge bg-info rounded-pill hub_port_badge">0</span>
+                    <span class="button_label">target</span>
+                </button>
+            </div>
+            <div class="col-3">
+                <div class="d-flex lh-1 text-center rm-checks">
+                    <div class="flex-fill row gx-1 justify-content-center">
+                        <div class="col-auto">
+                            <input class="form-check-input layer_checkbox0" type="checkbox" value="">
+                            <br><span class="small">0</span>
+                        </div>
+                        <div class="col-auto">
+                            <input class="form-check-input layer_checkbox1" type="checkbox" value="">
+                            <br><span class="small">1</span>
+                        </div>
+                        <div class="col-auto">
+                            <input class="form-check-input layer_checkbox2" type="checkbox" value="">
+                            <br><span class="small">2</span>
+                        </div>
+                        <div class="col-auto">
+                            <input class="form-check-input layer_checkbox3" type="checkbox" value="">
+                            <br><span class="small">3</span>
+                        </div>
+                        <div class="col-auto d-none">
+                            <input class="form-check-input layer_checkbox4" type="checkbox" value="">
+                            <br><span class="small">4</span>
+                        </div>
+                        <div class="col-auto d-none">
+                            <input class="form-check-input layer_checkbox5" type="checkbox" value="">
+                            <br><span class="small">5</span>
+                        </div>
+                        <div class="col-auto d-none">
+                            <input class="form-check-input layer_checkbox6" type="checkbox" value="">
+                            <br><span class="small">6</span>
+                        </div>
+                        <div class="col-auto d-none">
+                            <input class="form-check-input layer_checkbox7" type="checkbox" value="">
+                            <br><span class="small">7</span>
+                        </div>
+                    </div>
+                    <div class="row gx-1 rm-flag-checks">
+                        <div class="col-auto ms-1" title="Sticky">
+                            <input class="form-check-input sticky_checkbox" type="checkbox" value="">
+                            <br><span class="small">S</span>
+                        </div>
+                        <div class="col-auto" title="Tap">
+                            <input class="form-check-input tap_checkbox" type="checkbox" value="">
+                            <br><span class="small">T</span>
+                        </div>
+                        <div class="col-auto" title="Hold">
+                            <input class="form-check-input hold_checkbox" type="checkbox" value="">
+                            <br><span class="small">H</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-2"><input class="form-control scaling_input text-end" type="number"></div>
+        </div>
+    </template>
+
+    <template id="usage_button_template">
+        <button type="button" class="btn rm-chip usage_button"></button>
+    </template>
+
+    <template id="example_template">
+        <li class="list-group-item"><a href="javascript:void(0);"></a></li>
+    </template>
+
+    <template id="macro_template">
+        <div class="accordion-item" id="macro_N">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse_X">
+                    <span class="macro_name flex-shrink-0">Macro N</span>
+                    <span class="macro_preview px-3 flex-fill text-truncate"></span>
+                </button>
+            </h2>
+            <div id="collapse_X" class="accordion-collapse collapse" data-bs-parent="#macros_container">
+                <div class="accordion-body">
+                    <div class="macro_entries">
+                    </div>
+                    <div class="mt-2">
+                        <button type="button" class="add_macro_entry btn rm-btn is-sm is-ghost">+ step</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="macro_entry_template">
+        <div class="macro_entry row g-1 mt-1">
+
+            <div class="add_item_container col-auto">
+                <button type="button" class="add_macro_item btn rm-btn is-sm is-ghost">+</button>
+            </div>
+        </div>
+    </template>
+
+    <template id="macro_item_template">
+        <div class="btn-group macro_item col-auto">
+            <button type="button" class="delete_macro_item btn rm-key is-sm">×</button>
+            <button type="button" class="macro_item_usage btn rm-key is-sm" data-hid-usage="0x00000000">
+                <span class="button_label">Nothing</span>
+            </button>
+        </div>
+    </template>
+
+    <template id="expression_template">
+        <div class="rm-expression">
+            <label class="form-label expression_label">Expression</label>
+            <textarea type="text" class="form-control expression_input font-monospace" rows="1" spellcheck="false"></textarea>
+        </div>
+    </template>
+
+    <template id="monitor_template">
+        <div class="row monitor_row">
+            <div class="col-1"><button type="button" title="map this" class="btn rm-icon-btn is-sm map_this_button">+</button></div>
+            <div class="col-2 text-center monitor_usage position-relative">
+                <span class="position-absolute top-50 start-0 translate-middle badge bg-info rounded-pill hub_port_badge">0</span>
+                <span class="font-monospace usage_label"></span>
+            </div>
+            <div class="col-3 text-center monitor_readable_name"></div>
+            <div class="col-2 text-end monitor_last_value"></div>
+            <div class="col-2 text-end monitor_min_value"></div>
+            <div class="col-2 text-end monitor_max_value"></div>
+        </div>
+    </template>
+
+    <template id="quirk_template">
+        <div class="rm-quirk">
+            <div class="row">
+                <div class="col-1 pt-4">
+                    <button type="button" class="btn rm-icon-btn delete_button" title="Delete usage">×</button>
+                </div>
+                <div class="col-3">
+                    <label class="col-form-label">Vendor ID</label>
+                    <div class="input-group">
+                        <span class="input-group-text">0x</span>
+                        <input type="text" class="form-control vendor_id_input text-end">
+                    </div>
+                </div>
+                <div class="col-3">
+                    <label class="col-form-label">Product ID</label>
+                    <div class="input-group">
+                        <span class="input-group-text">0x</span>
+                        <input type="text" class="form-control product_id_input text-end">
+                    </div>
+                </div>
+                <div class="col-2">
+                    <label class="col-form-label">Interface</label>
+                    <input type="number" min="0" max="255" class="form-control interface_input text-end">
+                </div>
+                <div class="col-2">
+                    <label class="col-form-label">Report ID</label>
+                    <input type="number" min="0" max="255" class="form-control report_id_input text-end">
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-1">
+                </div>
+                <div class="col-3 pt-4">
+                    <div class="form-check">
+                        <input class="form-check-input relative_checkbox" type="checkbox" value="">
+                        <label class="form-check-label relative_checkbox_label">Relative</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input signed_checkbox" type="checkbox" value="">
+                        <label class="form-check-label signed_checkbox_label">Signed</label>
+                    </div>
+                </div>
+                <div class="col-3">
+                    <label class="col-form-label">Usage</label>
+                    <div class="input-group">
+                        <span class="input-group-text">0x</span>
+                        <input type="text" class="form-control usage_input text-end">
+                    </div>
+                </div>
+                <div class="col-2">
+                    <label class="col-form-label">Size</label>
+                    <input type="number" min="0" max="32" class="form-control size_input text-end">
+                </div>
+                <div class="col-2">
+                    <label class="col-form-label">Position</label>
+                    <input type="number" min="0" max="511" class="form-control bitpos_input text-end">
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <div id="source_usage_modal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title usage_modal_title">Select input</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" style="overflow-y: scroll;">
+                    <div class="row hub_port_container g-2 align-items-center">
+                        <div class="col-auto">
+                            <label for="source_port_dropdown" class="col-form-label">Port</label>
+                        </div>
+                        <div class="col-auto">
+                            <select class="form-select hub_port_dropdown" id="source_port_dropdown">
+                                <option value="0">all</option>
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                                <option value="13">13</option>
+                                <option value="14">14</option>
+                                <option value="15">15</option>
+                            </select>
+                        </div>
+                        <div class="col">
+                        </div>
+                        <div class="col-auto">
+                            <label for="input_labels_modal_dropdown" class="col-form-label">Input labels</label>
+                        </div>
+                        <div class="col-auto">
+                            <select class="form-select" id="input_labels_modal_dropdown">
+                                <option value="0">mouse</option>
+                                <option value="1">gamepad</option>
+                            </select>
+                        </div>
+                        <div class="col">
+                        </div>
+                        <div class="col-3 position-relative">
+                            <span class="position-absolute top-50 start-100 badge bg-success rounded-pill have_preferred_result_checkmark d-none" style="translate: -100% -50%">&check;</span>
+                            <input type="text" class="form-control usage_search_box" placeholder="Search">
+                        </div>
+                    </div>
+                    <div class="col mouse_usages mt-3">
+                    </div>
+                    <div class="col gamepad_usages mt-3">
+                    </div>
+                    <div class="col keyboard_usages mt-3">
+                    </div>
+                    <div class="col media_usages mt-3">
+                    </div>
+                    <div class="col other_usages mt-3">
+                    </div>
+                    <div class="col extra_usages mt-3">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="target_usage_modal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title usage_modal_title">Select output</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" style="overflow-y: scroll;">
+                    <div class="row hub_port_container g-2 align-items-center">
+                        <div class="col-auto hub_port_inputs">
+                            <label for="target_port_dropdown" class="col-form-label">Port</label>
+                        </div>
+                        <div class="col-auto hub_port_inputs">
+                            <select class="form-select hub_port_dropdown" id="target_port_dropdown">
+                                <option value="0">all</option>
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                                <option value="13">13</option>
+                                <option value="14">14</option>
+                                <option value="15">15</option>
+                            </select>
+                        </div>
+                        <div class="col">
+                        </div>
+                        <div class="col-3 position-relative">
+                            <span class="position-absolute top-50 start-100 badge bg-success rounded-pill have_preferred_result_checkmark d-none" style="translate: -100% -50%">&check;</span>
+                            <input type="text" class="form-control usage_search_box" placeholder="Search">
+                        </div>
+                    </div>
+                    <div class="col mouse_usages mt-3">
+                    </div>
+                    <div class="col gamepad_usages mt-3">
+                    </div>
+                    <div class="col keyboard_usages mt-3">
+                    </div>
+                    <div class="col media_usages mt-3">
+                    </div>
+                    <div class="col other_usages mt-3">
+                    </div>
+                    <div class="col extra_usages mt-3">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <input type="file" class="d-none" id="file_input">
+
+</body>
+
+</html>
