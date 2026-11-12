@@ -1,9 +1,85 @@
 <!doctype html>
-<html lang="cs"><head><meta charset="utf-8"><title>Gerzy's deck</title></head>
-<body style="font-family:Segoe UI;background:#0c0d0f;color:#eef0f2">
-<h1>Gerzy's deck</h1><pre id="s">…</pre>
-<script>
-const { invoke } = window.__TAURI__.core; const { listen } = window.__TAURI__.event;
-const show = (s) => document.getElementById('s').textContent = JSON.stringify(s, null, 2);
-invoke('get_state').then(show); listen('deck://state', (e) => show(e.payload));
-</script></body></html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gerzy's deck</title>
+  <script>
+    try { const t = localStorage.getItem('deck-theme'); if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) { }
+  </script>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div class="rm-shell">
+    <aside class="rm-sidebar">
+      <div class="rm-brand">
+        <span class="rm-brand-mark">
+          <svg class="i" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M7 10h.01M12 10h.01M17 10h.01M7 14h.01M12 14h.01M17 14h.01"/></svg>
+        </span>
+        <span class="rm-brand-text">
+          <span class="rm-brand-name">Gerzy's deck</span>
+          <span class="rm-brand-build">Konfigurace</span>
+        </span>
+      </div>
+
+      <nav class="rm-nav" id="nav">
+        <button class="rm-nav-item active" data-page="deck" type="button">
+          <svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+          <span>Deck</span>
+        </button>
+        <button class="rm-nav-item" data-page="profiles" type="button">
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          <span>Profily</span>
+        </button>
+        <button class="rm-nav-item" data-page="settings" type="button">
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+          <span>Nastavení</span>
+        </button>
+      </nav>
+
+      <div class="rm-side-device">
+        <div class="rm-side-heading">Zařízení</div>
+        <div class="rm-device-card" id="device-card">
+          <span class="rm-device-art">
+            <svg class="i" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M7 10h.01M12 10h.01M17 10h.01M7 14h.01M12 14h.01M17 14h.01"/></svg>
+            <span class="rm-device-live"></span>
+          </span>
+          <span class="rm-device-text">
+            <span class="rm-device-name">Fifine D6</span>
+            <span class="rm-device-sub" id="device-sub">Program neběží</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="rm-sidebar-foot">
+        <div class="rm-theme-switch" id="theme-switch">
+          <button type="button" data-theme-choice="auto">Auto</button>
+          <button type="button" data-theme-choice="dark">Dark</button>
+          <button type="button" data-theme-choice="light">Light</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="rm-main">
+      <header class="rm-topbar">
+        <div class="rm-title">
+          <h1 id="page-title">Deck</h1>
+          <p id="page-sub"></p>
+        </div>
+        <div class="rm-actions" id="top-actions">
+          <span class="rm-meta">Aktivní profil</span>
+          <select class="rm-select" id="profile-select" style="width:220px"></select>
+        </div>
+      </header>
+      <div class="rm-banners" id="banners"></div>
+      <div class="rm-content">
+        <section id="page-deck"></section>
+        <section id="page-profiles" hidden></section>
+        <section id="page-settings" hidden></section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
