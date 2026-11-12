@@ -60,12 +60,12 @@ fn decode(bytes: &[u8]) -> Option<image::DynamicImage> {
 /// Any image → 200×200 PNG, centre cover crop, alpha kept.
 pub fn normalize_upload(bytes: &[u8]) -> Result<Vec<u8>, RenderError> {
     if bytes.is_empty() {
-        return Err(RenderError::BadImage("Prázdný soubor".into()));
+        return Err(RenderError::BadImage(crate::i18n::tr("Prázdný soubor", "Empty file").into()));
     }
     if bytes.len() > MAX_UPLOAD_BYTES {
-        return Err(RenderError::BadImage("Obrázek je větší než 20 MB".into()));
+        return Err(RenderError::BadImage(crate::i18n::tr("Obrázek je větší než 20 MB", "The image is larger than 20 MB").into()));
     }
-    let img = decode(bytes).ok_or_else(|| RenderError::BadImage("Soubor není podporovaný obrázek".into()))?;
+    let img = decode(bytes).ok_or_else(|| RenderError::BadImage(crate::i18n::tr("Soubor není podporovaný obrázek", "The file is not a supported image").into()))?;
     let img = img.resize_to_fill(UPLOAD_SIZE, UPLOAD_SIZE, FilterType::Lanczos3);
     let mut out = Vec::new();
     img.to_rgba8()
@@ -233,7 +233,7 @@ pub fn render_usage_jpeg(name: &str, percent: Option<f32>, reset: Option<&str>, 
         }
     }
     if let Some(r) = reset {
-        center(&mut c, &format!("za {r}"), 12.0, 80, dim);
+        center(&mut c, &crate::trf!("za {r}", "in {r}"), 12.0, 80, dim);
     }
     tile_jpeg(&c)
 }
@@ -261,9 +261,9 @@ pub const BOOT_LOGO_H: u32 = 480;
 /// quality lowered until it fits the 16-bit length of the LOG command.
 pub fn boot_logo_jpeg(bytes: &[u8]) -> Result<Vec<u8>, RenderError> {
     if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
-        return Err(RenderError::BadImage("Obrázek chybí nebo je větší než 20 MB".into()));
+        return Err(RenderError::BadImage(crate::i18n::tr("Obrázek chybí nebo je větší než 20 MB", "The image is missing or larger than 20 MB").into()));
     }
-    let img = decode(bytes).ok_or_else(|| RenderError::BadImage("Soubor není podporovaný obrázek".into()))?;
+    let img = decode(bytes).ok_or_else(|| RenderError::BadImage(crate::i18n::tr("Soubor není podporovaný obrázek", "The file is not a supported image").into()))?;
     let canvas = img.resize_to_fill(BOOT_LOGO_W, BOOT_LOGO_H, FilterType::Lanczos3).to_rgb8();
     let rotated = imageops::rotate180(&canvas);
     // very detailed pictures: soften them a little as a last resort
@@ -282,7 +282,7 @@ pub fn boot_logo_jpeg(bytes: &[u8]) -> Result<Vec<u8>, RenderError> {
             }
         }
     }
-    Err(RenderError::BadImage("Obrázek se nedá zmenšit pod 64 kB, zkus jednodušší".into()))
+    Err(RenderError::BadImage(crate::i18n::tr("Obrázek se nedá zmenšit pod 64 kB, zkus jednodušší", "The image cannot be made smaller than 64 kB, try a simpler one").into()))
 }
 
 /// Standard JFIF 1.01 APP0, no thumbnail. The D6 decoder rejects JPEGs without it.

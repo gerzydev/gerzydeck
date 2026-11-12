@@ -192,6 +192,7 @@ struct Engine {
 impl Engine {
     fn new(d: EngineDeps) -> Self {
         let config = d.store.load();
+        crate::i18n::set_language(&config.language);
         let pending: Arc<Mutex<Vec<String>>> = Arc::default();
         let p = pending.clone();
         let runner = ActionRunner::new(d.keyboard, d.launch, d.system, Arc::new(move |id: &str| p.lock().unwrap().push(id.to_string())));
@@ -436,7 +437,7 @@ impl Engine {
 
     fn usage_tile(&self, provider: &str, window: &str, cfg: &crate::config::KeyConfig) -> UsageTile {
         let service = if provider == "claude" { "Claude" } else { "GPT" };
-        let name = if cfg.label.is_empty() { format!("{service} {}", if window == "weekly" { "týden" } else { "5h" }) } else { cfg.label.clone() };
+        let name = if cfg.label.is_empty() { format!("{service} {}", if window == "weekly" { crate::i18n::tr("týden", "week") } else { "5h" }) } else { cfg.label.clone() };
         let mut tile = UsageTile { name, percent: None, reset: None, error: None, bg: parse_hex(&cfg.bg) };
         match self.usage.get(provider) {
             Some(Ok(u)) => {
@@ -627,7 +628,7 @@ impl Engine {
                 }
             }
         }
-        self.store.save(&cfg).map_err(|e| format!("Uložení selhalo: {e}"))?;
+        self.store.save(&cfg).map_err(|e| crate::trf!("Uložení selhalo: {e}", "Saving failed: {e}"))?;
         self.store.prune_images(&cfg);
         if cfg.brightness != self.config.brightness {
             let _ = self.device_tx.send(DeviceCmd::SetBrightness(cfg.brightness));
@@ -647,7 +648,7 @@ impl Engine {
 
     fn swap_keys(&mut self, profile_id: &str, a: u8, b: u8) -> Result<Config, String> {
         if a == b || !(1..=15).contains(&a) || !(1..=15).contains(&b) {
-            return Err("Neplatné tlačítko".into());
+            return Err(crate::i18n::tr("Neplatné tlačítko", "Invalid key").into());
         }
         let profile = self.config.profiles.iter_mut().find(|p| p.id == profile_id).ok_or("Profil neexistuje")?;
         let ka = profile.keys.remove(&a.to_string()).unwrap_or_default();
@@ -668,7 +669,7 @@ impl Engine {
             self.rendered.remove(&k);
             self.last_frame.remove(&k);
         }
-        self.store.save(&self.config).map_err(|e| format!("Uložení selhalo: {e}"))?;
+        self.store.save(&self.config).map_err(|e| crate::trf!("Uložení selhalo: {e}", "Saving failed: {e}"))?;
         Ok(self.config.clone())
     }
 
@@ -686,6 +687,10 @@ impl Engine {
     /// Notifications and rendering after a config change. Runs after the caller got its reply,
     /// because sinks may block (Tauri tray calls wait for the main thread).
     fn after_config_change(&mut self) {
+        if crate::i18n::is_czech() != (self.config.language == "cs") {
+            crate::i18n::set_language(&self.config.language);
+            self.rendered.clear(); // key texts (AI usage) follow the language
+        }
         self.sink.config(&self.config);
         if self.exists(&self.state.active_profile_id) {
             self.emit_state();
@@ -748,14 +753,14 @@ impl Engine {
             Msg::Tick => self.on_tick(),
             Msg::SetBootLogo { jpeg, reply } => {
                 if !self.state.connected {
-                    let _ = reply.send(Err("Deck není připojený".into()));
+                    let _ = reply.send(Err(crate::i18n::tr("Deck není připojený", "The deck is not connected").into()));
                 } else if let Err(std::sync::mpsc::SendError(DeviceCmd::SetBootLogo { reply, .. })) = self.device_tx.send(DeviceCmd::SetBootLogo { jpeg, reply }) {
-                    let _ = reply.send(Err("Ovladač decku neběží".into()));
+                    let _ = reply.send(Err(crate::i18n::tr("Ovladač decku neběží", "The deck driver is not running").into()));
                 }
             }
             Msg::Usage { provider, result } => {
                 // keep showing the last numbers when a refresh fails for network reasons
-                let keep = matches!((&result, self.usage.get(&provider)), (Err(e), Some(Ok(_))) if e.contains("internet") || e.contains("dotaz"));
+                let keep = matches!((&result, self.usage.get(&provider)), (Err(e), Some(Ok(_))) if e.contains("internet") || e.contains("dotaz") || e.contains("requests"));
                 if !keep {
                     let view = match &result {
                         Ok(u) => crate::usage::UsageView { usage: u.clone(), error: None },
@@ -813,7 +818,7 @@ impl Engine {
             Msg::ImportImage(bytes, r) => {
                 let res = normalize_upload(&bytes)
                     .map_err(|e| e.to_string())
-                    .and_then(|png| self.store.save_image(&png).map_err(|e| format!("Uložení obrázku selhalo: {e}")));
+                    .and_then(|png| self.store.save_image(&png).map_err(|e| crate::trf!("Uložení obrázku selhalo: {e}", "Saving the image failed: {e}")));
                 let _ = r.send(res);
             }
             Msg::Shutdown => {

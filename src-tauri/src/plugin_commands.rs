@@ -32,7 +32,7 @@ impl Default for PluginNet {
 }
 
 fn host(tx: &HostTx, cmd: HostCmd) -> Result<(), String> {
-    tx.0.lock().unwrap().send(cmd).map_err(|_| "Hostitel pluginů neběží".to_string())
+    tx.0.lock().unwrap().send(cmd).map_err(|_| crate::i18n::tr("Hostitel pluginů neběží", "The plugin host is not running").to_string())
 }
 
 fn source_key(s: Source) -> &'static str {
@@ -76,7 +76,7 @@ pub struct InstallResult {
 pub async fn plugins_list(tx: tauri::State<'_, HostTx>) -> Result<Vec<PluginSummary>, String> {
     let (r, rx) = channel();
     host(&tx, HostCmd::ListPlugins(r))?;
-    rx.recv_timeout(Duration::from_secs(5)).map_err(|_| "Hostitel pluginů neodpovídá".to_string())
+    rx.recv_timeout(Duration::from_secs(5)).map_err(|_| crate::i18n::tr("Hostitel pluginů neodpovídá", "The plugin host is not responding").to_string())
 }
 
 #[tauri::command]
@@ -91,13 +91,13 @@ pub async fn plugins_catalog(net: tauri::State<'_, PluginNet>) -> Result<Catalog
 }
 
 async fn download(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
-    let resp = client.get(url).send().await.map_err(|e| format!("Stažení selhalo: {e}"))?;
+    let resp = client.get(url).send().await.map_err(|e| crate::trf!("Stažení selhalo: {e}", "Download failed: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("Stažení selhalo: HTTP {}", resp.status()));
+        return Err(crate::trf!("Stažení selhalo: HTTP {}", "Download failed: HTTP {}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e| format!("Stažení selhalo: {e}"))?;
+    let bytes = resp.bytes().await.map_err(|e| crate::trf!("Stažení selhalo: {e}", "Download failed: {e}"))?;
     if bytes.len() > 300 * 1024 * 1024 {
-        return Err("Plugin je větší než 300 MB".into());
+        return Err(crate::i18n::tr("Plugin je větší než 300 MB", "The plugin is larger than 300 MB").into());
     }
     Ok(bytes.to_vec())
 }
@@ -119,13 +119,13 @@ pub async fn plugins_install(
     id: String,
     asset_url: Option<String>,
 ) -> Result<InstallResult, String> {
-    let entry = net.catalog.lock().unwrap().iter().find(|e| e.id == id).cloned().ok_or("Plugin není v katalogu")?;
+    let entry = net.catalog.lock().unwrap().iter().find(|e| e.id == id).cloned().ok_or(crate::i18n::tr("Plugin není v katalogu", "The plugin is not in the catalogue"))?;
     let url = match asset_url {
         Some(u) => u,
         None => {
             let assets = catalog::resolve_download(&net.client, &entry).await.map_err(|e| e.to_string())?;
             match assets.len() {
-                0 => return Err("Plugin nemá soubor ke stažení".into()),
+                0 => return Err(crate::i18n::tr("Plugin nemá soubor ke stažení", "The plugin has no file to download").into()),
                 1 => assets[0].url.clone(),
                 _ => {
                     return Ok(InstallResult { installed: None, choose: assets.into_iter().map(|a| AssetRow { name: a.name, url: a.url }).collect() })
@@ -142,7 +142,7 @@ pub async fn plugins_install(
 #[tauri::command]
 pub async fn plugins_install_file(tx: tauri::State<'_, HostTx>, request: Request<'_>) -> Result<String, String> {
     let InvokeBody::Raw(bytes) = request.body() else {
-        return Err("Očekávám soubor pluginu".into());
+        return Err(crate::i18n::tr("Očekávám soubor pluginu", "Expected a plugin file").into());
     };
     install_bytes(&tx, bytes, None)
 }
@@ -157,8 +157,8 @@ pub async fn plugins_uninstall(tx: tauri::State<'_, HostTx>, id: String) -> Resu
 #[tauri::command]
 pub async fn pi_open(tx: tauri::State<'_, EngineTx>, profile_id: String, key: u8) -> Result<Option<PiInfo>, String> {
     let (r, rx) = channel();
-    tx.0.send(Msg::OpenPi { profile_id, key, reply: r }).map_err(|_| "Jádro programu neběží".to_string())?;
-    rx.recv_timeout(Duration::from_secs(5)).map_err(|_| "Hostitel pluginů neodpovídá".to_string())
+    tx.0.send(Msg::OpenPi { profile_id, key, reply: r }).map_err(|_| crate::i18n::tr("Jádro programu neběží", "The program core is not running").to_string())?;
+    rx.recv_timeout(Duration::from_secs(5)).map_err(|_| crate::i18n::tr("Hostitel pluginů neodpovídá", "The plugin host is not responding").to_string())
 }
 
 #[tauri::command]

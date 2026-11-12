@@ -1,6 +1,7 @@
 // Built-in key icons, drawn for Gerzy's deck (original artwork, no third-party logos).
 // Black background so they blend into the deck's keys; coloured glyph on a 24×24 grid.
 // The editor rasterises them to a 200×200 PNG on demand.
+import { t } from './i18n.js';
 
 const BG = '#000000';
 const BLURPLE = '#7B85F7'; // lifted Discord blurple, reads better on a black LCD
@@ -22,13 +23,13 @@ const speaker = (c) => `<path d="M3.5 9.5h3.5L11.5 5.5v13l-4.5-4H3.5z" fill="${c
 const speakerWaves = (c) => `${speaker(c)}<path d="M15 9a4.2 4.2 0 0 1 0 6M17.8 6.5a8 8 0 0 1 0 11"/>`;
 
 export const ICONS = [
-  { id: 'discord-mute', name: 'Discord – mikrofon vypnutý', svg: tile(BLURPLE, (c) => mic(c) + SLASH) },
-  { id: 'discord-mic', name: 'Discord – mikrofon', svg: tile(BLURPLE, mic) },
-  { id: 'discord-deafen', name: 'Discord – ohlušit', svg: tile(BLURPLE, (c) => headphones(c) + SLASH) },
-  { id: 'discord-headphones', name: 'Discord – sluchátka', svg: tile(BLURPLE, headphones) },
-  { id: 'mic-live', name: 'Mikrofon zapnutý', svg: tile(GREEN, mic) },
-  { id: 'volume-mute', name: 'Ztlumit zvuk', svg: tile(WHITE, (c) => speaker(c) + SLASH) },
-  { id: 'volume', name: 'Zvuk', svg: tile(WHITE, speakerWaves) },
+  { id: 'discord-mute', name: t("Discord – microphone off"), svg: tile(BLURPLE, (c) => mic(c) + SLASH) },
+  { id: 'discord-mic', name: t("Discord – microphone"), svg: tile(BLURPLE, mic) },
+  { id: 'discord-deafen', name: t("Discord – deafen"), svg: tile(BLURPLE, (c) => headphones(c) + SLASH) },
+  { id: 'discord-headphones', name: t("Discord – headphones"), svg: tile(BLURPLE, headphones) },
+  { id: 'mic-live', name: t("Microphone on"), svg: tile(GREEN, mic) },
+  { id: 'volume-mute', name: t("Mute"), svg: tile(WHITE, (c) => speaker(c) + SLASH) },
+  { id: 'volume', name: t("Sound"), svg: tile(WHITE, speakerWaves) },
 ];
 
 export const iconById = (id) => ICONS.find((i) => i.id === id);

@@ -57,11 +57,11 @@ pub fn image_upload(key: u8, jpeg: &[u8]) -> Vec<Vec<u8>> {
 /// answers "ACK\0\0OK" when done, then gets STP (see device.rs).
 pub fn boot_logo(jpeg: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u8>>), String> {
     if jpeg.len() < 4 || jpeg[..3] != [0xFF, 0xD8, 0xFF] {
-        return Err("Boot logo musí být JPEG".into());
+        return Err(crate::i18n::tr("Boot logo musí být JPEG", "The boot logo must be a JPEG").into());
     }
     // the official app sent 2 length bytes; stay inside them
     if jpeg.len() > 0xFFFF {
-        return Err("Boot logo je moc velké (max 64 kB)".into());
+        return Err(crate::i18n::tr("Boot logo je moc velké (max 64 kB)", "The boot logo is too large (max 64 kB)").into());
     }
     let len = jpeg.len() as u16;
     let cmd = command(&[b'L', b'O', b'G', 0, 0, (len >> 8) as u8, len as u8]);

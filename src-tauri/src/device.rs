@@ -137,7 +137,7 @@ impl<B: HidBackend> Worker<B> {
             DeviceCmd::SetKeyMap(m) => self.key_map = m,
             DeviceCmd::SetImages(_) => {} // engine re-sends everything on Connected
             DeviceCmd::SetBootLogo { reply, .. } => {
-                let _ = reply.send(Err("Deck není připojený".into()));
+                let _ = reply.send(Err(crate::i18n::tr("Deck není připojený", "The deck is not connected").into()));
             }
         }
         true
@@ -188,7 +188,7 @@ impl<B: HidBackend> Worker<B> {
         let acked = self.read_for(port, self.opts.logo_ack_timeout, true).map_err(io)?;
         port.write(&self.frame(&protocol::stop())).map_err(io)?;
         if !acked {
-            return Err(Some("Deck nepotvrdil uložení loga".into()));
+            return Err(Some(crate::i18n::tr("Deck nepotvrdil uložení loga", "The deck did not confirm saving the logo").into()));
         }
         self.read_for(port, self.opts.logo_erase_wait, false).map_err(io)?;
         port.write(&self.frame(&protocol::clear())).map_err(io)?;
@@ -239,7 +239,7 @@ impl<B: HidBackend> Worker<B> {
                     Ok(DeviceCmd::SetImages(images)) => pending.extend(images),
                     Ok(DeviceCmd::SetBootLogo { jpeg, reply }) => {
                         if let Some((_, old)) = logo.replace((jpeg, reply)) {
-                            let _ = old.send(Err("Nahrazeno novějším logem".into()));
+                            let _ = old.send(Err(crate::i18n::tr("Nahrazeno novějším logem", "Replaced by a newer logo").into()));
                         }
                     }
                     Ok(DeviceCmd::SetBrightness(b)) => {
@@ -270,7 +270,7 @@ impl<B: HidBackend> Worker<B> {
                             let _ = self.events.send(DeviceEvent::Redraw);
                         }
                         Err(None) => {
-                            let _ = reply.send(Err("Deck se během nahrávání odpojil".into()));
+                            let _ = reply.send(Err(crate::i18n::tr("Deck se během nahrávání odpojil", "The deck disconnected during the upload").into()));
                             return Exit::Disconnected;
                         }
                     }

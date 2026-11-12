@@ -140,18 +140,18 @@ impl std::error::Error for ManifestError {}
 impl Manifest {
     pub fn load(plugin_dir: &Path) -> Result<Self, ManifestError> {
         let file = confined_file(plugin_dir, "manifest.json")
-            .ok_or_else(|| ManifestError("Manifest chybí nebo je mimo složku pluginu".into()))?;
+            .ok_or_else(|| ManifestError(crate::i18n::tr("Manifest chybí nebo je mimo složku pluginu", "The manifest is missing or outside the plugin folder").into()))?;
         let json = fs::read_to_string(file)
-            .map_err(|e| ManifestError(format!("Nelze přečíst manifest: {e}")))?;
+            .map_err(|e| ManifestError(crate::trf!("Nelze přečíst manifest: {e}", "Cannot read the manifest: {e}")))?;
         let m: Self = serde_json::from_str(json.trim_start_matches('\u{feff}'))
-            .map_err(|e| ManifestError(format!("Neplatný manifest: {e}")))?;
+            .map_err(|e| ManifestError(crate::trf!("Neplatný manifest: {e}", "Invalid manifest: {e}")))?;
         if m.actions.is_empty()
             || m.actions
                 .iter()
                 .any(|a| a.states.is_empty() || a.uuid.is_empty() || a.name.is_empty())
         {
             return Err(ManifestError(
-                "Manifest musí obsahovat akce s názvem, UUID a alespoň jedním stavem".into(),
+                crate::i18n::tr("Manifest musí obsahovat akce s názvem, UUID a alespoň jedním stavem", "The manifest must contain actions with a name, a UUID and at least one state").into(),
             ));
         }
         Ok(m)
@@ -164,7 +164,7 @@ impl Manifest {
             .or(self.code_path.as_deref())
             .ok_or_else(|| ManifestError("Manifest neobsahuje cestu k programu pluginu".into()))?;
         let resolved = confined_file(plugin_dir, path).ok_or_else(|| {
-            ManifestError("Program pluginu chybí nebo je mimo jeho složku".into())
+            ManifestError(crate::i18n::tr("Program pluginu chybí nebo je mimo jeho složku", "The plugin program is missing or outside its folder").into())
         })?;
         let ext = resolved
             .extension()

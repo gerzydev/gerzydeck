@@ -18,6 +18,13 @@ pub struct Config {
     pub default_profile_id: String,
     pub active_profile_id: String,
     pub profiles: Vec<Profile>,
+    /// UI and core texts: "en" (default) or "cs"
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+fn default_language() -> String {
+    "en".into()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -104,7 +111,7 @@ pub fn create_profile(name: &str) -> Profile {
 }
 
 pub fn create_default_config() -> Config {
-    let p = create_profile("Výchozí");
+    let p = create_profile("Default");
     Config {
         version: CONFIG_VERSION,
         brightness: 80,
@@ -112,6 +119,7 @@ pub fn create_default_config() -> Config {
         default_profile_id: p.id.clone(),
         active_profile_id: p.id.clone(),
         profiles: vec![p],
+        language: default_language(),
     }
 }
 
@@ -291,6 +299,7 @@ pub fn normalize_config(raw: &Value) -> Config {
         default_profile_id,
         active_profile_id,
         profiles,
+        language: if raw["language"].as_str() == Some("cs") { "cs".into() } else { default_language() },
     }
 }
 
@@ -329,7 +338,7 @@ mod tests {
         let c = create_default_config();
         assert_eq!(c.version, 1);
         assert_eq!(c.profiles.len(), 1);
-        assert_eq!(c.profiles[0].name, "Výchozí");
+        assert_eq!(c.profiles[0].name, "Default");
         assert_eq!(c.profiles[0].keys.len(), 15);
         assert_eq!(c.profiles[0].key(7), &KeyConfig::default());
         assert_eq!(c.profiles[0].key(7).bg, "#141618");

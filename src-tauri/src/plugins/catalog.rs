@@ -50,7 +50,7 @@ pub fn parse_openaction(json: &str) -> Result<Vec<CatalogEntry>> {
         .into_iter()
         .map(|(id, e)| {
             if !super::install::valid_id(&id) {
-                bail!("Neplatné ID pluginu: {id}");
+                bail!("{}", crate::trf!("Neplatné ID pluginu: {id}", "Invalid plugin ID: {id}"));
             }
             Ok(CatalogEntry {
                 icon_url: format!("https://openactionapi.github.io/plugins/icons/{id}.png"),
@@ -71,7 +71,7 @@ pub fn parse_elgato(json: &str) -> Result<Vec<CatalogEntry>> {
         .into_iter()
         .map(|e| {
             if !super::install::valid_id(&e.id) {
-                bail!("Neplatné ID pluginu: {}", e.id);
+                bail!("{}", crate::trf!("Neplatné ID pluginu: {}", "Invalid plugin ID: {}", e.id));
             }
             Ok(CatalogEntry {
                 icon_url: format!("https://plugins.amankhanna.me/icons/{}.png", e.id),
@@ -133,7 +133,7 @@ fn release_assets(json: &str) -> Result<Vec<Asset>> {
         .iter()
         .find(|r| !r.draft && !r.prerelease)
         .or_else(|| releases.iter().find(|r| !r.draft))
-        .ok_or_else(|| anyhow!("Repozitář nemá vydání"))?;
+        .ok_or_else(|| anyhow!(crate::i18n::tr("Repozitář nemá vydání", "The repository has no release")))?;
     Ok(release
         .assets
         .iter()
@@ -160,10 +160,10 @@ pub async fn resolve_download(
     let repository = entry
         .repository
         .as_deref()
-        .ok_or_else(|| anyhow!("Plugin nemá odkaz ke stažení"))?;
+        .ok_or_else(|| anyhow!(crate::i18n::tr("Plugin nemá odkaz ke stažení", "The plugin has no download link")))?;
     let url = reqwest::Url::parse(repository)?;
     if url.scheme() != "https" || url.host_str() != Some("github.com") {
-        bail!("Plugin nemá repozitář na GitHubu");
+        bail!(crate::i18n::tr("Plugin nemá repozitář na GitHubu", "The plugin has no GitHub repository"));
     }
     let parts: Vec<_> = url.path().trim_matches('/').split('/').collect();
     if parts.len() != 2
@@ -174,7 +174,7 @@ pub async fn resolve_download(
                     .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
         })
     {
-        bail!("Neplatný repozitář GitHub");
+        bail!(crate::i18n::tr("Neplatný repozitář GitHub", "Invalid GitHub repository"));
     }
     release_assets(
         &fetch(

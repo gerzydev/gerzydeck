@@ -96,7 +96,7 @@ fn rfc3339(secs: i64) -> String {
 pub fn reset_text(now: i64, at: i64) -> String {
     let s = at - now;
     if s <= 0 {
-        "teď".into()
+        crate::i18n::tr("teď", "now").into()
     } else if s < 60 {
         "<1 min".into()
     } else if s < 3600 {
@@ -121,20 +121,20 @@ pub fn parse_claude(v: &Value) -> Result<Usage, String> {
     };
     let u = Usage { session: win("five_hour"), weekly: win("seven_day") };
     if u.session.is_none() && u.weekly.is_none() {
-        return Err("Neznámá odpověď od Claude".into());
+        return Err(crate::i18n::tr("Neznámá odpověď od Claude", "Unknown answer from Claude").into());
     }
     Ok(u)
 }
 
 pub fn parse_codex(v: &Value) -> Result<Usage, String> {
-    let rl = v.get("rate_limit").ok_or("Neznámá odpověď od ChatGPT")?;
+    let rl = v.get("rate_limit").ok_or(crate::i18n::tr("Neznámá odpověď od ChatGPT", "Unknown answer from ChatGPT"))?;
     let win = |k: &str| -> Option<Window> {
         let w = rl.get(k)?;
         Some(Window { percent: f(w.get("used_percent")?)?, resets_at: w.get("reset_at")?.as_i64()? })
     };
     let u = Usage { session: win("primary_window"), weekly: win("secondary_window") };
     if u.session.is_none() && u.weekly.is_none() {
-        return Err("Neznámá odpověď od ChatGPT".into());
+        return Err(crate::i18n::tr("Neznámá odpověď od ChatGPT", "Unknown answer from ChatGPT").into());
     }
     Ok(u)
 }
@@ -154,8 +154,8 @@ fn codex_file() -> PathBuf {
 }
 
 fn read_json(p: &Path) -> Result<Value, String> {
-    let t = std::fs::read_to_string(p).map_err(|_| "Nejsi přihlášený".to_string())?;
-    serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|_| "Soubor s přihlášením je poškozený".to_string())
+    let t = std::fs::read_to_string(p).map_err(|_| crate::i18n::tr("Nejsi přihlášený", "Not logged in").to_string())?;
+    serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|_| crate::i18n::tr("Soubor s přihlášením je poškozený", "The login file is damaged").to_string())
 }
 
 /// Write to a temp file next to it, then rename: the file is never half-written.
@@ -173,8 +173,8 @@ fn claude_needs_refresh(file: &Value, now_ms: i64) -> bool {
 }
 
 fn apply_claude_refresh(file: &mut Value, resp: &Value, now_ms: i64) -> Result<(), String> {
-    let access = resp["access_token"].as_str().ok_or("Obnovení přihlášení Claude selhalo")?;
-    let o = file.get_mut("claudeAiOauth").and_then(Value::as_object_mut).ok_or("Nejsi přihlášený v Claude Code")?;
+    let access = resp["access_token"].as_str().ok_or(crate::i18n::tr("Obnovení přihlášení Claude selhalo", "Refreshing the Claude login failed"))?;
+    let o = file.get_mut("claudeAiOauth").and_then(Value::as_object_mut).ok_or(crate::i18n::tr("Nejsi přihlášený v Claude Code", "Not logged in to Claude Code"))?;
     o.insert("accessToken".into(), access.into());
     if let Some(r) = resp["refresh_token"].as_str() {
         o.insert("refreshToken".into(), r.into());
@@ -186,8 +186,8 @@ fn apply_claude_refresh(file: &mut Value, resp: &Value, now_ms: i64) -> Result<(
 }
 
 fn apply_codex_refresh(file: &mut Value, resp: &Value, now_iso: &str) -> Result<(), String> {
-    let access = resp["access_token"].as_str().ok_or("Obnovení přihlášení ChatGPT selhalo")?;
-    let t = file.get_mut("tokens").and_then(Value::as_object_mut).ok_or("Nejsi přihlášený v Codexu")?;
+    let access = resp["access_token"].as_str().ok_or(crate::i18n::tr("Obnovení přihlášení ChatGPT selhalo", "Refreshing the ChatGPT login failed"))?;
+    let t = file.get_mut("tokens").and_then(Value::as_object_mut).ok_or(crate::i18n::tr("Nejsi přihlášený v Codexu", "Not logged in to Codex"))?;
     t.insert("access_token".into(), access.into());
     for k in ["refresh_token", "id_token"] {
         if let Some(v) = resp[k].as_str() {
@@ -208,11 +208,11 @@ fn jwt_exp(token: &str) -> Option<i64> {
 // ---------- fetching ----------
 
 async fn post_json(client: &reqwest::Client, url: &str, body: &Value) -> Result<Value, String> {
-    let res = client.post(url).json(body).send().await.map_err(|_| "Bez připojení k internetu".to_string())?;
+    let res = client.post(url).json(body).send().await.map_err(|_| crate::i18n::tr("Bez připojení k internetu", "No internet connection").to_string())?;
     let status = res.status();
     let v: Value = res.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
-        return Err("Přihlášení vypršelo – přihlas se".into());
+        return Err(crate::i18n::tr("Přihlášení vypršelo – přihlas se", "Login expired, log in again").into());
     }
     Ok(v)
 }
@@ -231,9 +231,9 @@ async fn get_json(client: &reqwest::Client, url: &str, headers: &[(&str, &str)])
 
 fn http_err(s: reqwest::StatusCode) -> String {
     match s.as_u16() {
-        401 | 403 => "Přihlášení vypršelo – přihlas se".into(),
-        429 => "Moc dotazů, zkusím později".into(),
-        503 => "Bez připojení k internetu".into(),
+        401 | 403 => crate::i18n::tr("Přihlášení vypršelo – přihlas se", "Login expired, log in again").into(),
+        429 => crate::i18n::tr("Moc dotazů, zkusím později", "Too many requests, retrying later").into(),
+        503 => crate::i18n::tr("Bez připojení k internetu", "No internet connection").into(),
         c => format!("Chyba serveru ({c})"),
     }
 }
@@ -243,7 +243,7 @@ async fn claude(client: &reqwest::Client) -> Result<Usage, String> {
     let mut file = read_json(&path).map_err(|e| format!("{e} (Claude Code)"))?;
     if claude_needs_refresh(&file, now_s() * 1000) {
         let o = &file["claudeAiOauth"];
-        let refresh = o["refreshToken"].as_str().ok_or("Nejsi přihlášený v Claude Code")?;
+        let refresh = o["refreshToken"].as_str().ok_or(crate::i18n::tr("Nejsi přihlášený v Claude Code", "Not logged in to Claude Code"))?;
         let scope = o["scopes"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" ")).unwrap_or_default();
         let resp = post_json(client, CLAUDE_TOKEN_URL, &serde_json::json!({
             "grant_type": "refresh_token", "refresh_token": refresh, "client_id": CLAUDE_CLIENT_ID, "scope": scope,
@@ -256,7 +256,7 @@ async fn claude(client: &reqwest::Client) -> Result<Usage, String> {
         log::info!("usage: Claude login refreshed");
         file = fresh;
     }
-    let token = file["claudeAiOauth"]["accessToken"].as_str().ok_or("Nejsi přihlášený v Claude Code")?;
+    let token = file["claudeAiOauth"]["accessToken"].as_str().ok_or(crate::i18n::tr("Nejsi přihlášený v Claude Code", "Not logged in to Claude Code"))?;
     let auth = format!("Bearer {token}");
     let v = get_json(client, CLAUDE_USAGE_URL, &[("Authorization", &auth), ("anthropic-beta", "oauth-2025-04-20")]).await.map_err(http_err)?;
     parse_claude(&v)
@@ -265,9 +265,9 @@ async fn claude(client: &reqwest::Client) -> Result<Usage, String> {
 async fn codex(client: &reqwest::Client) -> Result<Usage, String> {
     let path = codex_file();
     let mut file = read_json(&path).map_err(|e| format!("{e} (Codex)"))?;
-    let access = file["tokens"]["access_token"].as_str().ok_or("Codex není přihlášený přes ChatGPT")?;
+    let access = file["tokens"]["access_token"].as_str().ok_or(crate::i18n::tr("Codex není přihlášený přes ChatGPT", "Codex is not logged in with ChatGPT"))?;
     if jwt_exp(access).is_none_or(|e| e - REFRESH_MARGIN_S <= now_s()) {
-        let refresh = file["tokens"]["refresh_token"].as_str().ok_or("Codex není přihlášený přes ChatGPT")?;
+        let refresh = file["tokens"]["refresh_token"].as_str().ok_or(crate::i18n::tr("Codex není přihlášený přes ChatGPT", "Codex is not logged in with ChatGPT"))?;
         let resp = post_json(client, CODEX_TOKEN_URL, &serde_json::json!({
             "client_id": CODEX_CLIENT_ID, "grant_type": "refresh_token", "refresh_token": refresh, "scope": "openid profile email",
         }))
@@ -289,7 +289,7 @@ pub async fn fetch(client: &reqwest::Client, provider: &str) -> Result<Usage, St
     match provider {
         "claude" => claude(client).await,
         "codex" => codex(client).await,
-        _ => Err("Neznámá služba".into()),
+        _ => Err(crate::i18n::tr("Neznámá služba", "Unknown service").into()),
     }
 }
 
@@ -413,7 +413,7 @@ mod tests {
         assert_eq!(reset_text(1000, 1000 + 25 * 60), "25 min");
         assert_eq!(reset_text(1000, 1000 + 3 * 3600 + 25 * 60), "3 h 25");
         assert_eq!(reset_text(1000, 1000 + 2 * 86400 + 5 * 3600), "2 d 5 h");
-        assert_eq!(reset_text(1000, 900), "teď");
+        assert_eq!(reset_text(1000, 900), "now");
     }
 
     #[test]

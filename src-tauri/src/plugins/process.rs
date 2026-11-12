@@ -119,7 +119,7 @@ pub fn spawn(
     if !valid_id(&plugin.id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Neplatné ID pluginu",
+            crate::i18n::tr("Neplatné ID pluginu", "Invalid plugin ID"),
         ));
     }
     let root = plugin.dir.canonicalize()?;
@@ -131,7 +131,7 @@ pub fn spawn(
     if !runtime_path.starts_with(&root) || !runtime_path.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "Program je mimo složku pluginu",
+            crate::i18n::tr("Program je mimo složku pluginu", "The program is outside the plugin folder"),
         ));
     }
     let mut command = match runtime {
@@ -139,7 +139,7 @@ pub fn spawn(
         Runtime::Node { .. } => {
             let node = node
                 .path()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Chybí Node.js"))?;
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, crate::i18n::tr("Chybí Node.js", "Node.js is missing")))?;
             let mut command = Command::new(node);
             command.arg(&runtime_path);
             command
@@ -147,7 +147,7 @@ pub fn spawn(
         Runtime::Html(_) => {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "HTML plugin vyžaduje hostitelský WebView",
+                crate::i18n::tr("HTML plugin vyžaduje hostitelský WebView", "An HTML plugin needs the host WebView"),
             ))
         }
     };
@@ -158,7 +158,7 @@ pub fn spawn(
         Ok(_) if !log_path.canonicalize()?.starts_with(&logs) => {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "Log je mimo složku logů",
+                crate::i18n::tr("Log je mimo složku logů", "The log is outside the log folder"),
             ))
         }
         Ok(_) => {}
@@ -298,7 +298,7 @@ mod win {
             }
             Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                "Vlákno pluginu nebylo nalezeno",
+                crate::i18n::tr("Vlákno pluginu nebylo nalezeno", "The plugin thread was not found"),
             ))
         }
     }

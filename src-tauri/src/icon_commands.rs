@@ -11,7 +11,7 @@ fn store() -> IconStore {
 fn raw<'a>(request: &'a Request<'_>, what: &str) -> Result<&'a [u8], String> {
     match request.body() {
         InvokeBody::Raw(bytes) => Ok(bytes),
-        _ => Err(format!("Očekávám {what}")),
+        _ => Err(crate::trf!("Očekávám {what}", "Expected {what}")),
     }
 }
 
@@ -23,7 +23,7 @@ pub async fn icons_library() -> Vec<LibraryIcon> {
 /// Raw image bytes; the name travels base64-encoded in the `x-name` header.
 #[tauri::command]
 pub async fn icons_upload(request: Request<'_>) -> Result<LibraryIcon, String> {
-    let bytes = raw(&request, "obrázek")?;
+    let bytes = raw(&request, crate::i18n::tr("obrázek", "an image"))?;
     let name = request
         .headers()
         .get("x-name")
@@ -51,7 +51,7 @@ pub async fn icon_pack_icons(id: String) -> Result<Vec<PackIcon>, String> {
 
 #[tauri::command]
 pub async fn icon_pack_import(request: Request<'_>) -> Result<IconPack, String> {
-    store().import_pack(raw(&request, "balík ikon")?)
+    store().import_pack(raw(&request, crate::i18n::tr("balík ikon", "an icon pack"))?)
 }
 
 #[tauri::command]

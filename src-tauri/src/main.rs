@@ -28,7 +28,7 @@ impl EventSink for TauriSink {
     fn state(&self, s: &State) {
         let _ = self.0.emit("deck://state", s);
         if let Some(tray) = self.0.tray_by_id(TRAY_ID) {
-            let status = if s.connected { "Připojeno" } else { "Nepřipojeno" };
+            let status = if s.connected { gerzys_deck::i18n::tr("Připojeno", "Connected") } else { gerzys_deck::i18n::tr("Nepřipojeno", "Not connected") };
             let tip: String = format!("Gerzy's deck — {status} · {}", s.active_profile_name).chars().take(63).collect();
             // set_tooltip waits for the main thread; never make the engine thread wait for it.
             std::thread::spawn(move || {
@@ -221,8 +221,8 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Otevřít editor", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Ukončit", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", gerzys_deck::i18n::tr("Otevřít editor", "Open editor"), true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", gerzys_deck::i18n::tr("Ukončit", "Quit"), true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit_item])?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Gerzy's deck")

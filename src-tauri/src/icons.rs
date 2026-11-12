@@ -136,7 +136,7 @@ impl IconStore {
 
     pub fn delete_library(&self, id: &str) -> Result<(), String> {
         if !is_library_id(id) {
-            return Err(err("Neplatná ikona"));
+            return Err(err(crate::i18n::tr("Neplatná ikona", "Invalid icon")));
         }
         let _ = std::fs::remove_file(self.library_dir().join(id));
         let mut meta = self.read_meta();
@@ -146,9 +146,9 @@ impl IconStore {
 
     /// Imports a `.streamDeckIconPack` (zip with `<id>.sdIconPack/manifest.json`).
     pub fn import_pack(&self, bytes: &[u8]) -> Result<IconPack, String> {
-        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| err("Soubor není balík ikon (ZIP)"))?;
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| err(crate::i18n::tr("Soubor není balík ikon (ZIP)", "The file is not an icon pack (ZIP)")))?;
         if archive.len() > MAX_PACK_ENTRIES {
-            return Err(err("Balík obsahuje příliš mnoho souborů"));
+            return Err(err(crate::i18n::tr("Balík obsahuje příliš mnoho souborů", "The pack contains too many files")));
         }
         let mut paths = Vec::with_capacity(archive.len());
         for i in 0..archive.len() {
@@ -162,7 +162,7 @@ impl IconStore {
             .filter(|(p, dir)| !dir && p.file_name().is_some_and(|n| n == "manifest.json"))
             .min_by_key(|(p, _)| p.components().count())
             .map(|(p, _)| p.clone())
-            .ok_or_else(|| err("Balík neobsahuje manifest.json"))?;
+            .ok_or_else(|| err(crate::i18n::tr("Balík neobsahuje manifest.json", "The pack has no manifest.json")))?;
         let prefix = manifest.parent().map(Path::to_path_buf).unwrap_or_default();
         let folder = prefix.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let id = folder.strip_suffix(".sdIconPack").unwrap_or(folder).to_string();
@@ -191,7 +191,7 @@ impl IconStore {
                 (&mut f).take(MAX_PACK_BYTES - total + 1).read_to_end(&mut buf).map_err(|e| e.to_string())?;
                 total += buf.len() as u64;
                 if total > MAX_PACK_BYTES {
-                    return Err(err("Balík je větší než 200 MB"));
+                    return Err(err(crate::i18n::tr("Balík je větší než 200 MB", "The pack is larger than 200 MB")));
                 }
                 std::fs::write(&out, buf).map_err(|e| e.to_string())?;
             }
@@ -207,7 +207,7 @@ impl IconStore {
             let _ = std::fs::remove_dir_all(&stage);
             e.to_string()
         })?;
-        self.pack_info(&id).ok_or_else(|| err("Balík se nepodařilo načíst"))
+        self.pack_info(&id).ok_or_else(|| err(crate::i18n::tr("Balík se nepodařilo načíst", "Could not load the pack")))
     }
 
     fn pack_info(&self, id: &str) -> Option<IconPack> {
@@ -248,10 +248,10 @@ impl IconStore {
 
     pub fn pack_icons(&self, id: &str) -> Result<Vec<PackIcon>, String> {
         if !crate::plugins::install::valid_id(id) && !id.starts_with("pack-") {
-            return Err(err("Neplatný balík"));
+            return Err(err(crate::i18n::tr("Neplatný balík", "Invalid pack")));
         }
         let dir = self.packs_dir().join(id);
-        let root = dir.canonicalize().map_err(|_| err("Balík neexistuje"))?;
+        let root = dir.canonicalize().map_err(|_| err(crate::i18n::tr("Balík neexistuje", "The pack does not exist")))?;
         let rel_of = |p: &Path| p.strip_prefix(&root).ok().map(|r| r.to_string_lossy().replace('\\', "/"));
         let mut out = vec![];
         if let Some(entries) = std::fs::read_to_string(dir.join("icons.json")).ok().and_then(|t| serde_json::from_str::<Vec<PackEntry>>(t.trim_start_matches('\u{feff}')).ok()) {
@@ -285,7 +285,7 @@ impl IconStore {
 
     pub fn delete_pack(&self, id: &str) -> Result<(), String> {
         if !crate::plugins::install::valid_id(id) && !id.starts_with("pack-") {
-            return Err(err("Neplatný balík"));
+            return Err(err(crate::i18n::tr("Neplatný balík", "Invalid pack")));
         }
         std::fs::remove_dir_all(self.packs_dir().join(id)).map_err(|e| e.to_string())
     }

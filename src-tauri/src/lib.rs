@@ -16,3 +16,4 @@ mod engine_plugin_tests;
 pub mod icons;
 pub mod icon_commands;
 pub mod usage;
+pub mod i18n;

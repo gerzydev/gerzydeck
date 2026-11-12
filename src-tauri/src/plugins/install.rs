@@ -31,7 +31,7 @@ impl From<io::Error> for InstallError {
 }
 impl From<zip::result::ZipError> for InstallError {
     fn from(e: zip::result::ZipError) -> Self {
-        Self(format!("neplatný archiv ZIP: {e}"))
+        Self(crate::trf!("neplatný archiv ZIP: {e}", "invalid ZIP archive: {e}"))
     }
 }
 fn invalid(message: &str) -> InstallError {
@@ -66,12 +66,12 @@ pub(crate) fn valid_id(id: &str) -> bool {
 }
 pub(crate) fn zip_path(name: &str) -> Result<PathBuf, InstallError> {
     if name.starts_with(['/', '\\']) {
-        return Err(invalid("archiv obsahuje absolutní cestu"));
+        return Err(invalid(crate::i18n::tr("archiv obsahuje absolutní cestu", "the archive contains an absolute path")));
     }
     let name = name.replace('\\', "/");
     let trimmed = name.trim_end_matches('/');
     if !trimmed.split('/').all(safe_component) {
-        return Err(invalid("archiv obsahuje nebezpečnou cestu"));
+        return Err(invalid(crate::i18n::tr("archiv obsahuje nebezpečnou cestu", "the archive contains an unsafe path")));
     }
     Ok(PathBuf::from(trimmed))
 }
@@ -98,7 +98,7 @@ impl Stage {
         }
         Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            "Nelze vytvořit dočasnou složku",
+            crate::i18n::tr("Nelze vytvořit dočasnou složku", "Cannot create a temporary folder"),
         ))
     }
 }
@@ -117,7 +117,7 @@ fn contained_existing(root: &Path, path: &Path) -> io::Result<()> {
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Složka pluginu je mimo úložiště",
+            crate::i18n::tr("Složka pluginu je mimo úložiště", "The plugin folder is outside the storage"),
         ));
     }
     Ok(())
@@ -129,7 +129,7 @@ pub fn install_from_zip(
 ) -> Result<InstalledPlugin, InstallError> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
     if archive.len() > MAX_ENTRIES {
-        return Err(invalid("archiv obsahuje více než 20 000 položek"));
+        return Err(invalid(crate::i18n::tr("archiv obsahuje více než 20 000 položek", "the archive has more than 20,000 entries")));
     }
     let mut paths = Vec::with_capacity(archive.len());
     let mut names = HashSet::new();
@@ -138,16 +138,16 @@ pub fn install_from_zip(
         let file = archive.by_index(i)?;
         let path = zip_path(&file.name()?)?;
         if !names.insert(path.to_string_lossy().to_lowercase()) {
-            return Err(invalid("archiv obsahuje duplicitní cesty"));
+            return Err(invalid(crate::i18n::tr("archiv obsahuje duplicitní cesty", "the archive contains duplicate paths")));
         }
         if file.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000) {
-            return Err(invalid("archiv obsahuje symbolický odkaz"));
+            return Err(invalid(crate::i18n::tr("archiv obsahuje symbolický odkaz", "the archive contains a symbolic link")));
         }
         total = total
             .checked_add(file.size())
-            .ok_or_else(|| invalid("archiv je příliš velký"))?;
+            .ok_or_else(|| invalid(crate::i18n::tr("archiv je příliš velký", "the archive is too large")))?;
         if total > MAX_BYTES {
-            return Err(invalid("rozbalený archiv přesahuje 300 MB"));
+            return Err(invalid(crate::i18n::tr("rozbalený archiv přesahuje 300 MB", "the unpacked archive exceeds 300 MB")));
         }
         paths.push(path);
     }
@@ -163,7 +163,7 @@ pub fn install_from_zip(
         .ok_or_else(|| invalid("archiv neobsahuje manifest.json"))?;
     let prefix = manifest_path.parent().unwrap_or(Path::new(""));
     if manifests.iter().any(|p| !p.starts_with(prefix)) {
-        return Err(invalid("archiv obsahuje více kořenových manifestů pluginu"));
+        return Err(invalid(crate::i18n::tr("archiv obsahuje více kořenových manifestů pluginu", "the archive has more than one plugin root manifest")));
     }
     let wrapped = prefix.components().count() == 1
         && prefix
@@ -178,9 +178,9 @@ pub fn install_from_zip(
     } else {
         fallback_id
     }
-    .ok_or_else(|| invalid("archiv nemá složku sdPlugin ani náhradní ID"))?;
+    .ok_or_else(|| invalid(crate::i18n::tr("archiv nemá složku sdPlugin ani náhradní ID", "the archive has no sdPlugin folder or fallback ID")))?;
     if !valid_id(id) {
-        return Err(invalid("neplatné ID pluginu"));
+        return Err(invalid(crate::i18n::tr("neplatné ID pluginu", "invalid plugin ID")));
     }
     fs::create_dir_all(plugins_dir)?;
     let root = plugins_dir.canonicalize()?;
@@ -211,11 +211,11 @@ pub fn install_from_zip(
         let copied = io::copy(&mut (&mut file).take(MAX_BYTES - actual + 1), &mut target)?;
         actual += copied;
         if actual > MAX_BYTES {
-            return Err(invalid("rozbalený archiv přesahuje 300 MB"));
+            return Err(invalid(crate::i18n::tr("rozbalený archiv přesahuje 300 MB", "the unpacked archive exceeds 300 MB")));
         }
     }
     let manifest =
-        Manifest::load(&unpacked).map_err(|e| invalid(&format!("neplatný manifest: {e}")))?;
+        Manifest::load(&unpacked).map_err(|e| invalid(&crate::trf!("neplatný manifest: {e}", "invalid manifest: {e}")))?;
     let dir = root.join(format!("{id}.sdPlugin"));
     let backup = stage.0.join("previous");
     let replacing = match fs::symlink_metadata(&dir) {
@@ -232,7 +232,7 @@ pub fn install_from_zip(
             if let Err(rollback) = fs::rename(&backup, &dir) {
                 let preserved = stage.0.clone();
                 std::mem::forget(stage);
-                return Err(invalid(&format!("nelze dokončit instalaci ({error}) ani obnovit původní plugin ({rollback}); záloha: {}", preserved.display())));
+                return Err(invalid(&crate::trf!("nelze dokončit instalaci ({error}) ani obnovit původní plugin ({rollback}); záloha: {}", "cannot finish the installation ({error}) nor restore the previous plugin ({rollback}); backup: {}", preserved.display())));
             }
         }
         return Err(error.into());
@@ -247,7 +247,7 @@ pub fn uninstall(plugins_dir: &Path, id: &str) -> io::Result<()> {
     if !valid_id(id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Neplatné ID pluginu",
+            crate::i18n::tr("Neplatné ID pluginu", "Invalid plugin ID"),
         ));
     }
     let root = match plugins_dir.canonicalize() {
@@ -473,7 +473,7 @@ mod tests {
             install_from_zip(&zip.finish().unwrap().into_inner(), &p, Some("test.id"))
                 .unwrap_err()
                 .to_string()
-                .contains("20 000")
+                .contains("20,000")
         );
         fs::remove_dir_all(p).unwrap();
     }

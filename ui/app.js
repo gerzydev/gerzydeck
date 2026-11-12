@@ -3,38 +3,39 @@ import { TEMPLATES, sameAction } from './templates.js';
 import { iconById, rasterizeIcon } from './icons.js';
 import { renderIconsPage, pickIcon } from './iconlib.js';
 import { renderPluginsPage, loadInstalled, pluginActionFields, pickPluginAction, closePi, pluginAction } from './plugins.js';
+import { t, lang, setLang } from './i18n.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-const WOW_NOTE = 'Pozor: ve WoW je víc herních akcí na jedno zmáčknutí proti pravidlům Blizzardu.';
-const TEXT_NOTE = 'Psaní textu funguje v běžných aplikacích, hry ho mohou ignorovat.';
+const WOW_NOTE = t("Careful: in WoW, more than one game action per key press breaks Blizzard's rules.");
+const TEXT_NOTE = t("Typing text works in regular apps, games may ignore it.");
 
 const ACTION_TYPES = [
-  ['none', 'Nic'], ['keys', 'Klávesa / zkratka'], ['macro', 'Makro'], ['launch', 'Spustit program / web'],
-  ['media', 'Média a hlasitost'], ['system', 'Systém'], ['profile', 'Přepnout profil'], ['usage', 'Využití AI (Claude, GPT)'], ['plugin', 'Plugin…'],
+  ['none', t("None")], ['keys', t("Key / shortcut")], ['macro', t("Macro")], ['launch', t("Launch program / website")],
+  ['media', t("Media and volume")], ['system', t("System")], ['profile', t("Switch profile")], ['usage', t("AI usage (Claude, GPT)")], ['plugin', 'Plugin…'],
 ];
-const MEDIA = [['playpause', 'Přehrát / pauza'], ['next', 'Další skladba'], ['prev', 'Předchozí skladba'], ['mute', 'Ztlumit zvuk'], ['volup', 'Hlasitost +'], ['voldown', 'Hlasitost −']];
-const SYSTEM = [['lock', 'Zamknout PC'], ['sleep', 'Uspat PC']];
-const USAGE_PROVIDERS = [['claude', 'Claude (přihlášení z Claude Code)'], ['codex', 'ChatGPT (přihlášení z Codexu)']];
-const USAGE_WINDOWS = [['session', '5hodinové okno'], ['weekly', 'Týdenní limit']];
-const STEP_TYPES = [['tap', 'Stisk'], ['down', 'Držet'], ['up', 'Pustit'], ['wait', 'Čekat'], ['text', 'Napsat text']];
+const MEDIA = [['playpause', t("Play / pause")], ['next', t("Next track")], ['prev', t("Previous track")], ['mute', t("Mute")], ['volup', t("Volume +")], ['voldown', t("Volume −")]];
+const SYSTEM = [['lock', t("Lock PC")], ['sleep', t("Sleep PC")]];
+const USAGE_PROVIDERS = [['claude', t("Claude (login from Claude Code)")], ['codex', t("ChatGPT (login from Codex)")]];
+const USAGE_WINDOWS = [['session', t("5-hour window")], ['weekly', t("Weekly limit")]];
+const STEP_TYPES = [['tap', t("Tap")], ['down', t("Hold")], ['up', t("Release")], ['wait', t("Wait")], ['text', t("Type text")]];
 const MODS = ['ControlLeft', 'ControlRight', 'ShiftLeft', 'ShiftRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight'];
 const NAMES = {
-  ControlLeft: 'Ctrl', ControlRight: 'Pravý Ctrl', ShiftLeft: 'Shift', ShiftRight: 'Pravý Shift', AltLeft: 'Alt', AltRight: 'AltGr',
-  MetaLeft: 'Win', MetaRight: 'Pravý Win', Space: 'Mezerník', Enter: 'Enter', Escape: 'Esc', Tab: 'Tab', Backspace: 'Backspace',
+  ControlLeft: 'Ctrl', ControlRight: t("Right Ctrl"), ShiftLeft: 'Shift', ShiftRight: t("Right Shift"), AltLeft: 'Alt', AltRight: 'AltGr',
+  MetaLeft: 'Win', MetaRight: t("Right Win"), Space: t("Space"), Enter: 'Enter', Escape: 'Esc', Tab: 'Tab', Backspace: 'Backspace',
   CapsLock: 'Caps Lock', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', PageUp: 'PgUp', PageDown: 'PgDn',
   Insert: 'Insert', Delete: 'Delete', PrintScreen: 'PrtSc', ContextMenu: 'Menu', NumLock: 'Num Lock', ScrollLock: 'Scroll Lock',
   Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';', Quote: "'", Backquote: '`',
-  Comma: ',', Period: '.', Slash: '/', IntlBackslash: '\\ (vedle Shiftu)', NumpadMultiply: 'Num *', NumpadAdd: 'Num +',
+  Comma: ',', Period: '.', Slash: '/', IntlBackslash: t('\\ (next to Shift)'), NumpadMultiply: 'Num *', NumpadAdd: 'Num +',
   NumpadSubtract: 'Num −', NumpadDivide: 'Num /', NumpadDecimal: 'Num ,', NumpadEnter: 'Num Enter',
 };
 const PAGES = {
-  deck: ['Deck', 'Klikni na tlačítko a nastav mu obrázek a akci. Změny se ukládají hned.'],
-  plugins: ['Pluginy', 'Pluginy pro Stream Deck: OBS, Spotify, Discord, PC metriky a stovky dalších.'],
-  profiles: ['Profily', 'Každý profil má vlastních 15 tlačítek. Profil se může přepnout sám podle programu v popředí.'],
-  icons: ['Ikony', 'Katalog open-source ikon, tvoje vlastní obrázky a balíky ikon pro Stream Deck.'],
-  settings: ['Nastavení', 'Jas, spouštění s Windows a kalibrace tlačítek.'],
+  deck: ['Deck', t("Click a key to set its image and action. Changes are saved right away.")],
+  plugins: [t("Plugins"), t("Stream Deck plugins: OBS, Spotify, Discord, PC metrics and hundreds more.")],
+  profiles: [t("Profiles"), t("Each profile has its own 15 keys. A profile can switch on its own based on the program in the foreground.")],
+  icons: [t("Icons"), t("Open-source icon catalogue, your own images and Stream Deck icon packs.")],
+  settings: [t("Settings"), t("Brightness, start with Windows, key calibration and boot logo.")],
 };
 
 let config = null;
@@ -108,14 +109,14 @@ async function imageUrl(id) {
 function actionSummary(a) {
   switch (a?.type) {
     case 'keys': return a.codes.map(codeName).join(' + ');
-    case 'macro': return `Makro (${a.steps.length} kroků)`;
-    case 'launch': return `Spustit ${a.target}`;
-    case 'media': return MEDIA.find(([v]) => v === a.command)?.[1] ?? 'Média';
-    case 'system': return SYSTEM.find(([v]) => v === a.command)?.[1] ?? 'Systém';
+    case 'macro': return t("Macro ({0} steps)", a.steps.length);
+    case 'launch': return t("Launch {0}", a.target);
+    case 'media': return MEDIA.find(([v]) => v === a.command)?.[1] ?? t("Media");
+    case 'system': return SYSTEM.find(([v]) => v === a.command)?.[1] ?? t("System");
     case 'plugin': return pluginAction(a.plugin, a.action).action?.name ?? 'Plugin';
-    case 'usage': return `${a.provider === 'claude' ? 'Claude' : 'GPT'} – ${a.window === 'weekly' ? 'týden' : '5h okno'}`;
-    case 'profile': return a.profileId === '__back' ? 'Předchozí profil' : `Profil: ${config.profiles.find((p) => p.id === a.profileId)?.name ?? '?'}`;
-    default: return 'Bez akce';
+    case 'usage': return `${a.provider === 'claude' ? 'Claude' : 'GPT'} – ${a.window === 'weekly' ? t("week") : t("5h window")}`;
+    case 'profile': return a.profileId === '__back' ? t("Previous profile") : t("Profile: {0}", config.profiles.find((p) => p.id === a.profileId)?.name ?? '?');
+    default: return t("No action");
   }
 }
 
@@ -153,7 +154,7 @@ function fillTile(btn, cfg, k) {
 
 function resetText(at) {
   const s = Math.round(at - Date.now() / 1000);
-  if (s <= 0) return 'teď';
+  if (s <= 0) return t("now");
   if (s < 60) return '<1 min';
   if (s < 3600) return `${Math.floor(s / 60)} min`;
   if (s < 86400) return `${Math.floor(s / 3600)} h ${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}`;
@@ -163,7 +164,7 @@ function resetText(at) {
 /** Same layout as the key on the deck: name, percentage, bar, reset countdown. */
 function usagePreview(cfg) {
   const a = cfg.action;
-  const name = cfg.label || `${a.provider === 'claude' ? 'Claude' : 'GPT'} ${a.window === 'weekly' ? 'týden' : '5h'}`;
+  const name = cfg.label || `${a.provider === 'claude' ? 'Claude' : 'GPT'} ${a.window === 'weekly' ? t("week") : '5h'}`;
   const u = state.usage?.[a.provider];
   const w = u && (a.window === 'weekly' ? u.weekly : u.session);
   const box = h('span', { class: 'usage-prev' }, h('span', { class: 'u-name' }, name));
@@ -174,7 +175,7 @@ function usagePreview(cfg) {
     box.append(
       h('span', { class: 'u-pct', style: `color:${color}` }, `${Math.round(w.percent)} %`),
       h('span', { class: 'u-bar' }, h('span', { style: `width:${Math.min(100, Math.max(0, w.percent))}%;background:${color}` })),
-      h('span', { class: 'u-reset' }, `za ${resetText(w.resetsAt)}`));
+      h('span', { class: 'u-reset' }, t("in {0}", resetText(w.resetsAt))));
   }
   return box;
 }
@@ -187,8 +188,8 @@ function refreshTile(k) {
 // ---------- sidebar / top ----------
 function renderSidebar() {
   $('device-card').classList.toggle('is-on', Boolean(state.connected));
-  $('device-sub').textContent = state.connected === undefined ? 'Program neběží'
-    : `${state.connected ? 'Připojeno' : 'Nepřipojeno'} · ${state.activeProfileName ?? ''}`;
+  $('device-sub').textContent = state.connected === undefined ? t("Program not running")
+    : `${state.connected ? t("Connected") : t("Not connected")} · ${state.activeProfileName ?? ''}`;
 }
 
 function renderProfileSelect() {
@@ -199,9 +200,9 @@ function renderProfileSelect() {
 function renderBanners() {
   const b = [];
   const warn = (text) => h('div', { class: 'rm-banner' }, svgIcon('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>'), text);
-  if (state.conflicts?.length) b.push(warn(`Běží software Fifine (${state.conflicts.join(', ')}) — zavři ho, jinak se budou s deckem přetahovat.`));
-  if (state.foregroundElevated) b.push(warn('Okno v popředí běží jako správce — klávesy z decku do něj nedojdou.'));
-  if (state.connected === false) b.push(warn('Deck není připojený. Zkontroluj USB kabel — program se připojí sám.'));
+  if (state.conflicts?.length) b.push(warn(t("Fifine software is running ({0}), close it or it will fight over the deck.", state.conflicts.join(', '))));
+  if (state.foregroundElevated) b.push(warn(t("The foreground window runs as administrator, keys from the deck won't reach it.")));
+  if (state.connected === false) b.push(warn(t("The deck is not connected. Check the USB cable, the program reconnects on its own.")));
   $('banners').replaceChildren(...b);
 }
 
@@ -249,7 +250,7 @@ function renderDeck() {
     }));
   }
   grid.querySelector(`[data-key="${selectedKey}"]`)?.classList.add('selected');
-  const board = h('div', { class: 'deck-board' }, grid, h('div', { class: 'deck-caption' }, `Profil „${activeProfile().name}“ — rozložení jako na decku`));
+  const board = h('div', { class: 'deck-board' }, grid, h('div', { class: 'deck-caption' }, t("Profile “{0}”, laid out like the deck", activeProfile().name)));
   $('page-deck').replaceChildren(h('div', { class: 'deck-layout' }, board, renderEditor()));
 }
 
@@ -269,7 +270,7 @@ function renderEditor() {
   };
 
   const fileInput = h('input', { type: 'file', accept: 'image/*', hidden: true, onchange: (e) => e.target.files[0] && importImage(e.target.files[0]) });
-  const thumb = h('div', { class: 'img-thumb' }, cfg.image ? '' : 'žádný');
+  const thumb = h('div', { class: 'img-thumb' }, cfg.image ? '' : t("none"));
   if (cfg.image) imageUrl(cfg.image).then((u) => u && thumb.replaceChildren(h('img', { src: u, alt: '' })));
   const drop = h('div', {
     class: 'img-drop',
@@ -286,9 +287,9 @@ function renderEditor() {
         else if (res) {
           try { cfg.image = await invoke('import_image', res); save(); renderDeck(); } catch (e) { toast(e); }
         }
-      } }, 'Vybrat obrázek…'),
-      cfg.image && h('button', { class: 'rm-btn is-sm is-ghost is-danger', type: 'button', onclick: () => { cfg.image = null; refreshTile(k); save(); renderDeck(); } }, 'Odebrat')),
-    h('span', { class: 'rm-meta' }, 'Katalog ikon, tvoje ikony, balíky… nebo sem obrázek přetáhni.')),
+      } }, t("Choose image…")),
+      cfg.image && h('button', { class: 'rm-btn is-sm is-ghost is-danger', type: 'button', onclick: () => { cfg.image = null; refreshTile(k); save(); renderDeck(); } }, t("Remove"))),
+    h('span', { class: 'rm-meta' }, t("Icon catalogue, your icons, packs… or drop an image here."))),
   fileInput);
 
   async function importImage(file) {
@@ -314,23 +315,23 @@ function renderEditor() {
 
   const panel = h('div', { class: 'rm-panel' },
     h('div', { class: 'rm-panel-head' },
-      h('h2', {}, `Tlačítko ${k}`),
+      h('h2', {}, t("Key {0}", k)),
       h('div', { class: 'rm-end' },
-        h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => { showTemplates = !showTemplates; renderDeck(); } }, showTemplates ? 'Zavřít šablony' : 'Šablony'),
+        h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => { showTemplates = !showTemplates; renderDeck(); } }, showTemplates ? t("Close templates") : t("Templates")),
         h('button', { class: 'rm-btn is-sm is-ghost is-danger', type: 'button', onclick: () => {
           activeProfile().keys[String(k)] = { image: null, label: '', bg: '#141618', action: { type: 'none' } };
           save(); renderDeck();
-        } }, 'Vymazat'))),
+        } }, t("Clear")))),
     h('div', { class: 'rm-panel-body rm-stack' },
       tplList,
-      h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Obrázek'), drop,
+      h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Image")), drop,
         ),
       h('div', { class: 'rm-row' },
-        h('label', { class: 'rm-field rm-grow' }, h('span', { class: 'rm-label' }, 'Popisek'),
-          h('input', { class: 'rm-input', value: cfg.label, maxLength: 40, placeholder: 'např. Fireball', oninput: (e) => { cfg.label = e.target.value; refreshTile(k); save(); } })),
-        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Pozadí'),
+        h('label', { class: 'rm-field rm-grow' }, h('span', { class: 'rm-label' }, t("Label")),
+          h('input', { class: 'rm-input', value: cfg.label, maxLength: 40, placeholder: t("e.g. Fireball"), oninput: (e) => { cfg.label = e.target.value; refreshTile(k); save(); } })),
+        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Background")),
           h('input', { class: 'rm-color', type: 'color', value: cfg.bg, oninput: (e) => { cfg.bg = e.target.value; refreshTile(k); save(); } }))),
-      h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Akce'),
+      h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Action")),
         actionGrid(cfg, async (type) => {
           if (type === 'plugin') {
             const pick = await pickPluginAction(ui);
@@ -369,7 +370,7 @@ const ACTION_ICONS = {
   plugin: '<path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/>',
   usage: '<path d="M4 15a8 8 0 0 1 16 0"/><path d="M12 15l4-5"/><path d="M4 19h16"/>',
 };
-const ACTION_SHORT = { none: 'Nic', keys: 'Klávesa', macro: 'Makro', launch: 'Spustit', media: 'Média', system: 'Systém', profile: 'Profil', usage: 'Využití AI', plugin: 'Plugin' };
+const ACTION_SHORT = { none: t("None"), keys: t("Key"), macro: t("Macro"), launch: t("Launch"), media: t("Media"), system: t("System"), profile: t("Profile"), usage: t("AI usage"), plugin: 'Plugin' };
 
 /** 4×2 grid of action types; the Plugin tile shows the chosen plugin action. */
 function actionGrid(cfg, onPick) {
@@ -424,24 +425,24 @@ function actionFields(cfg, changed, redraw, k) {
     case 'plugin':
       return pluginActionFields(ui, activeProfile().id, k, cfg, (rerender) => { save(); if (rerender) renderDeck(); else changed(); });
     case 'keys': {
-      const recBtn = h('button', { class: 'rm-btn is-sm', type: 'button' }, 'Nahrát zkratku');
+      const recBtn = h('button', { class: 'rm-btn is-sm', type: 'button' }, t("Record shortcut"));
       recBtn.onclick = () => {
-        if (recording) { stopRecording(); recBtn.classList.remove('is-recording'); recBtn.textContent = 'Nahrát zkratku'; return; }
+        if (recording) { stopRecording(); recBtn.classList.remove('is-recording'); recBtn.textContent = t("Record shortcut"); return; }
         recBtn.classList.add('is-recording');
-        recBtn.textContent = 'Zmáčkni zkratku na klávesnici…';
+        recBtn.textContent = t("Press the shortcut on your keyboard…");
         startRecording((codes) => { a.codes = sortCodes(codes).slice(0, 6); changed(); redraw(); });
       };
       const chips = h('div', { class: 'chips' },
         a.codes.length ? a.codes.flatMap((c, i) => [
           i > 0 && h('span', { class: 'rm-plus' }, '+'),
           h('span', { class: 'rm-chip', title: c }, codeName(c),
-            h('button', { type: 'button', title: 'Odebrat', onclick: () => { a.codes.splice(i, 1); changed(); redraw(); } }, '×')),
-        ]) : h('span', { class: 'rm-meta' }, 'Zatím žádná klávesa.'));
+            h('button', { type: 'button', title: t("Remove"), onclick: () => { a.codes.splice(i, 1); changed(); redraw(); } }, '×')),
+        ]) : h('span', { class: 'rm-meta' }, t("No key yet.")));
       return [
-        h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Klávesy (stisknou se spolu a drží, dokud držíš tlačítko)'), chips),
+        h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Keys (pressed together and held while you hold the deck key)")), chips),
         h('div', { class: 'rm-row' }, recBtn,
-          h('div', { class: 'rm-grow' }, codeSelect('', (c) => { if (c && !a.codes.includes(c) && a.codes.length < 6) { a.codes = sortCodes([...a.codes, c]); changed(); redraw(); } }, '+ přidat klávesu ze seznamu'))),
-        h('div', { class: 'rm-meta' }, 'Klávesy se ukládají podle pozice na klávesnici. Zkratky, které si Windows vezme dřív (Win+L, Ctrl+Alt+Del), přidej ze seznamu.'),
+          h('div', { class: 'rm-grow' }, codeSelect('', (c) => { if (c && !a.codes.includes(c) && a.codes.length < 6) { a.codes = sortCodes([...a.codes, c]); changed(); redraw(); } }, t("+ add a key from the list")))),
+        h('div', { class: 'rm-meta' }, t("Keys are stored by their position on the keyboard. Add shortcuts that Windows catches first (Win+L, Ctrl+Alt+Del) from the list.")),
       ];
     }
     case 'macro': {
@@ -449,7 +450,7 @@ function actionFields(cfg, changed, redraw, k) {
       const rows = a.steps.map((s, i) => {
         let param;
         if (s.type === 'wait') param = h('input', { class: 'rm-input', type: 'number', min: 0, max: 60000, step: 10, value: s.ms, oninput: (e) => { s.ms = Math.max(0, Math.min(60000, parseInt(e.target.value, 10) || 0)); changed(); } });
-        else if (s.type === 'text') param = h('input', { class: 'rm-input', value: s.text, placeholder: 'Text k napsání', oninput: (e) => { s.text = e.target.value; changed(); } });
+        else if (s.type === 'text') param = h('input', { class: 'rm-input', value: s.text, placeholder: t("Text to type"), oninput: (e) => { s.text = e.target.value; changed(); } });
         else param = codeSelect(s.code, (c) => { s.code = c; changed(); });
         return h('div', { class: 'step' },
           h('select', { class: 'rm-select', onchange: (e) => {
@@ -459,24 +460,24 @@ function actionFields(cfg, changed, redraw, k) {
           } }, STEP_TYPES.map(([v, l]) => option(v, l, s.type))),
           param,
           h('div', { class: 'step-tools' },
-            h('button', { class: 'rm-icon-btn', type: 'button', title: 'Nahoru', disabled: i === 0, onclick: () => { [a.steps[i - 1], a.steps[i]] = [a.steps[i], a.steps[i - 1]]; changed(); redraw(); } }, '↑'),
-            h('button', { class: 'rm-icon-btn', type: 'button', title: 'Dolů', disabled: i === a.steps.length - 1, onclick: () => { [a.steps[i + 1], a.steps[i]] = [a.steps[i], a.steps[i + 1]]; changed(); redraw(); } }, '↓'),
-            h('button', { class: 'rm-icon-btn is-danger', type: 'button', title: 'Smazat krok', disabled: a.steps.length === 1, onclick: () => { a.steps.splice(i, 1); changed(); redraw(); } }, '×')));
+            h('button', { class: 'rm-icon-btn', type: 'button', title: t("Up"), disabled: i === 0, onclick: () => { [a.steps[i - 1], a.steps[i]] = [a.steps[i], a.steps[i - 1]]; changed(); redraw(); } }, '↑'),
+            h('button', { class: 'rm-icon-btn', type: 'button', title: t("Down"), disabled: i === a.steps.length - 1, onclick: () => { [a.steps[i + 1], a.steps[i]] = [a.steps[i], a.steps[i + 1]]; changed(); redraw(); } }, '↓'),
+            h('button', { class: 'rm-icon-btn is-danger', type: 'button', title: t("Delete step"), disabled: a.steps.length === 1, onclick: () => { a.steps.splice(i, 1); changed(); redraw(); } }, '×')));
       });
       return [
         h('div', { class: 'rm-note is-warn' }, WOW_NOTE),
-        h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Kroky (proběhnou jednou po zmáčknutí)'), h('div', { class: 'steps' }, rows)),
+        h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Steps (run once per press)")), h('div', { class: 'steps' }, rows)),
         hasText && h('div', { class: 'rm-note' }, TEXT_NOTE),
         h('div', { class: 'rm-row' },
-          h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => { a.steps.push({ type: 'tap', code: 'Digit1' }); changed(); redraw(); } }, '+ Krok'),
-          h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => { a.steps.push({ type: 'wait', ms: 100 }); changed(); redraw(); } }, '+ Čekání')),
+          h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => { a.steps.push({ type: 'tap', code: 'Digit1' }); changed(); redraw(); } }, t("+ Step")),
+          h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => { a.steps.push({ type: 'wait', ms: 100 }); changed(); redraw(); } }, t("+ Wait"))),
       ];
     }
     case 'launch':
       return [
-        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Program, soubor, složka nebo adresa webu'),
+        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Program, file, folder or web address")),
           h('input', { class: 'rm-input', value: a.target, placeholder: 'C:\\Program Files\\…\\program.exe  nebo  https://…', oninput: (e) => { a.target = e.target.value; changed(); } })),
-        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Argumenty (volitelné, jen u programů)'),
+        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Arguments (optional, programs only)")),
           h('input', { class: 'rm-input', value: joinArgs(a.args), oninput: (e) => { a.args = splitArgs(e.target.value); changed(); } })),
       ];
     case 'media':
@@ -485,18 +486,18 @@ function actionFields(cfg, changed, redraw, k) {
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, SYSTEM.map(([v, l]) => option(v, l, a.command)))];
     case 'usage':
       return [
-        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Služba'),
+        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Service")),
           h('select', { class: 'rm-select', onchange: (e) => { a.provider = e.target.value; changed(); } }, USAGE_PROVIDERS.map(([v, l]) => option(v, l, a.provider)))),
         h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, 'Limit'),
           h('select', { class: 'rm-select', onchange: (e) => { a.window = e.target.value; changed(); } }, USAGE_WINDOWS.map(([v, l]) => option(v, l, a.window)))),
-        h('div', { class: 'rm-meta' }, 'Tlačítko ukáže procenta a čas do resetu, obnovuje se každou minutu a stiskem hned. Použije přihlášení z Claude Code / Codexu – ty nemusí běžet, stačí v nich být přihlášený. Popisek nahradí název nahoře.'),
+        h('div', { class: 'rm-meta' }, t("The key shows the percentage and the time until reset, refreshed every minute and right away on press. It uses the login from Claude Code / Codex: they don't have to run, you just need to be logged in. The label replaces the name at the top.")),
       ];
     case 'profile':
       return [h('select', { class: 'rm-select', onchange: (e) => { a.profileId = e.target.value; changed(); } },
-        option('__back', 'Předchozí profil', a.profileId),
+        option('__back', t("Previous profile"), a.profileId),
         config.profiles.map((p) => option(p.id, p.name, a.profileId)))];
     default:
-      return [h('div', { class: 'rm-meta' }, 'Tlačítko nic nedělá. Vyber akci nebo použij šablonu.')];
+      return [h('div', { class: 'rm-meta' }, t("The key does nothing. Pick an action or use a template."))];
   }
 }
 
@@ -534,7 +535,7 @@ function renderProfiles() {
   for (const p of config.profiles) {
     const isDefault = p.id === config.defaultProfileId;
     const isActive = p.id === activeId();
-    const procInput = h('input', { class: 'rm-input', placeholder: 'např. wow.exe', list: 'proc-list' });
+    const procInput = h('input', { class: 'rm-input', placeholder: t("e.g. wow.exe"), list: 'proc-list' });
     procInput.setAttribute('list', 'proc-list');
     const addProc = () => {
       const v = procInput.value.trim().toLowerCase();
@@ -545,17 +546,17 @@ function renderProfiles() {
     list.append(h('div', { class: 'rm-panel' },
       h('div', { class: 'rm-panel-head' },
         h('input', { class: 'rm-input', style: 'width:240px;font-weight:600', value: p.name, maxLength: 60, oninput: (e) => { p.name = e.target.value; save(); renderProfileSelect(); } }),
-        isDefault && h('span', { class: 'prof-badge' }, 'Výchozí'),
-        isActive && h('span', { class: 'prof-badge' }, 'Aktivní'),
+        isDefault && h('span', { class: 'prof-badge' }, t("Default")),
+        isActive && h('span', { class: 'prof-badge' }, t("Active")),
         h('div', { class: 'rm-end' },
-          !isDefault && h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => { config.defaultProfileId = p.id; save(); renderProfiles(); } }, 'Nastavit jako výchozí'),
-          !isActive && h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => switchProfile(p.id) }, 'Přepnout na deck'),
+          !isDefault && h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => { config.defaultProfileId = p.id; save(); renderProfiles(); } }, t("Set as default")),
+          !isActive && h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => switchProfile(p.id) }, t("Show on deck")),
           h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => {
             const copy = structuredClone(p);
             copy.id = newId(); copy.name = `${p.name} (kopie)`; copy.processes = [];
             config.profiles.splice(config.profiles.indexOf(p) + 1, 0, copy);
             save(); renderProfiles(); renderProfileSelect();
-          } }, 'Duplikovat'),
+          } }, t("Duplicate")),
           h('button', { class: 'rm-btn is-sm is-ghost is-danger', type: 'button', disabled: config.profiles.length === 1, onclick: () => {
             if (!delArmed) { pendingDelete = p.id; renderProfiles(); setTimeout(() => { if (pendingDelete === p.id) { pendingDelete = null; renderProfiles(); } }, 3000); return; }
             pendingDelete = null;
@@ -564,28 +565,28 @@ function renderProfiles() {
             if (config.activeProfileId === p.id) config.activeProfileId = config.defaultProfileId;
             if (state.activeProfileId === p.id) state.activeProfileId = config.activeProfileId;
             save(); renderProfiles(); renderProfileSelect();
-          } }, delArmed ? 'Opravdu smazat?' : 'Smazat'))),
+          } }, delArmed ? t("Really delete?") : t("Delete")))),
       h('div', { class: 'rm-panel-body rm-stack' },
         h('div', { class: 'rm-field' },
-          h('span', { class: 'rm-label' }, 'Přepnout automaticky, když je v popředí program:'),
+          h('span', { class: 'rm-label' }, t("Switch automatically when this program is in the foreground:")),
           h('div', { class: 'chips' },
             p.processes.length ? p.processes.map((proc, i) => h('span', { class: 'rm-chip' }, proc,
-              h('button', { type: 'button', title: 'Odebrat', onclick: () => { p.processes.splice(i, 1); save(); renderProfiles(); } }, '×')))
-              : h('span', { class: 'rm-meta' }, isDefault ? 'Výchozí profil se použije, když žádné pravidlo nesedí.' : 'Žádné pravidlo — profil se přepíná jen ručně.'))),
+              h('button', { type: 'button', title: t("Remove"), onclick: () => { p.processes.splice(i, 1); save(); renderProfiles(); } }, '×')))
+              : h('span', { class: 'rm-meta' }, isDefault ? t("The default profile is used when no rule matches.") : t("No rule, the profile is only switched manually.")))),
         h('div', { class: 'rm-row' },
           h('div', { class: 'rm-grow' }, procInput),
-          h('button', { class: 'rm-btn is-sm', type: 'button', onclick: addProc }, 'Přidat')))));
+          h('button', { class: 'rm-btn is-sm', type: 'button', onclick: addProc }, t("Add"))))));
   }
   $('page-profiles').replaceChildren(
     h('div', { class: 'rm-row', style: 'margin-bottom:12px' },
       h('button', { class: 'rm-btn is-primary', type: 'button', onclick: () => {
         const keys = {};
         for (let k = 1; k <= 15; k++) keys[k] = { image: null, label: '', bg: '#141618', action: { type: 'none' } };
-        config.profiles.push({ id: newId(), name: 'Nový profil', processes: [], keys });
+        config.profiles.push({ id: newId(), name: t("New profile"), processes: [], keys });
         save(); renderProfiles(); renderProfileSelect();
-      } }, '+ Nový profil'),
-      h('button', { class: 'rm-btn is-ghost', type: 'button', onclick: loadProcesses }, 'Načíst běžící programy'),
-      h('span', { class: 'rm-meta' }, processNames.length ? `Nabídka obsahuje ${processNames.length} běžících programů.` : 'Tip: spusť hru a klikni na „Načíst běžící programy“.')),
+      } }, t("+ New profile")),
+      h('button', { class: 'rm-btn is-ghost', type: 'button', onclick: loadProcesses }, t("Load running programs")),
+      h('span', { class: 'rm-meta' }, processNames.length ? t("The list has {0} running programs.", processNames.length) : t("Tip: start the game and click “Load running programs”."))),
     datalist, list);
 }
 
@@ -609,13 +610,20 @@ function renderSettings() {
       renderSettings();
     } });
   const rows = h('div', { class: 'kv' },
-    h('div', {}, h('b', {}, 'Jas displejů'),
+    h('div', {}, h('div', { class: 'rm-stack', style: 'gap:2px' }, h('b', {}, t('Language')), h('span', { class: 'rm-meta' }, 'English / Čeština')),
+      h('select', { class: 'rm-select', style: 'width:auto;min-width:160px', onchange: async (e) => {
+        config.language = e.target.value;
+        await saveNow();
+        setLang(config.language);
+        location.reload();
+      } }, option('en', 'English', config.language ?? 'en'), option('cs', 'Čeština', config.language ?? 'en'))),
+    h('div', {}, h('b', {}, t("Display brightness")),
       h('div', { class: 'rm-row' }, h('input', { type: 'range', min: 0, max: 100, value: config.brightness, oninput: (e) => { config.brightness = +e.target.value; bright.textContent = `${config.brightness} %`; save(); } }), bright)),
-    h('div', {}, h('div', { class: 'rm-stack', style: 'gap:2px' }, h('b', {}, 'Spouštět s Windows'), h('span', { class: 'rm-meta' }, 'Program se spustí schovaný v oznamovací oblasti.')), sw),
-    h('div', {}, h('div', { class: 'rm-stack', style: 'gap:2px' }, h('b', {}, 'Kalibrace tlačítek'), h('span', { class: 'rm-meta' }, config.keyMap ? 'Použita vlastní kalibrace.' : 'Výchozí rozložení (ověřené na tvém decku).')),
+    h('div', {}, h('div', { class: 'rm-stack', style: 'gap:2px' }, h('b', {}, t("Start with Windows")), h('span', { class: 'rm-meta' }, t("The program starts hidden in the notification area."))), sw),
+    h('div', {}, h('div', { class: 'rm-stack', style: 'gap:2px' }, h('b', {}, t("Key calibration")), h('span', { class: 'rm-meta' }, config.keyMap ? t("Custom calibration in use.") : t("Default layout (verified on your deck)."))),
       h('div', { class: 'rm-row' },
-        config.keyMap && h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => { config.keyMap = null; save(); renderSettings(); } }, 'Obnovit výchozí'),
-        h('button', { class: 'rm-btn is-sm', type: 'button', onclick: startCalibration }, 'Spustit kalibraci'))),
+        config.keyMap && h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => { config.keyMap = null; save(); renderSettings(); } }, t("Reset to default")),
+        h('button', { class: 'rm-btn is-sm', type: 'button', onclick: startCalibration }, t("Start calibration")))),
     h('div', {}, h('b', {}, 'Data'), h('code', {}, '%APPDATA%\\GerzysDeck')));
 
   const parts = [h('div', { class: 'rm-panel' }, h('div', { class: 'rm-panel-body', style: 'padding-top:8px' }, rows)), bootLogoPanel()];
@@ -643,7 +651,7 @@ function bootLogoPanel() {
     renderSettings();
     try {
       await invoke('set_boot_logo', new Uint8Array(await bootLogo.file.arrayBuffer()));
-      toast('Boot logo je uložené v decku. Ukáže se po příštím zapojení.');
+      toast(t("The boot logo is stored in the deck. It shows the next time you plug it in."));
     } catch (e) { toast(e); }
     bootLogo.busy = false;
     renderSettings();
@@ -651,19 +659,19 @@ function bootLogoPanel() {
   const preview = h('div', { class: 'boot-prev',
     ondragover: (e) => { e.preventDefault(); },
     ondrop: (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type.startsWith('image/')) pickBoot(f); } },
-  bootLogo.url ? h('img', { src: bootLogo.url, alt: '' }) : h('span', { class: 'rm-meta' }, 'Sem přetáhni obrázek'));
+  bootLogo.url ? h('img', { src: bootLogo.url, alt: '' }) : h('span', { class: 'rm-meta' }, t("Drop an image here")));
   return h('div', { class: 'rm-panel' },
     h('div', { class: 'rm-panel-head' }, h('h2', {}, 'Boot logo')),
     h('div', { class: 'rm-panel-body rm-stack' },
-      h('span', { class: 'rm-meta' }, 'Obrázek, který deck ukáže po zapojení, než se připojí program. Ořízne se na 800 × 480 a uloží přímo do decku.'),
+      h('span', { class: 'rm-meta' }, t("The image the deck shows when plugged in, before the program connects. It is cropped to 800 × 480 and stored in the deck itself.")),
       preview,
       h('div', { class: 'rm-row', style: 'flex-wrap:wrap' },
-        h('button', { class: 'rm-btn is-sm', type: 'button', disabled: bootLogo.busy, onclick: () => input.click() }, 'Vybrat obrázek…'),
-        h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', disabled: bootLogo.busy, onclick: useDefault }, 'Logo Gerzy\'s deck'),
+        h('button', { class: 'rm-btn is-sm', type: 'button', disabled: bootLogo.busy, onclick: () => input.click() }, t("Choose image…")),
+        h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', disabled: bootLogo.busy, onclick: useDefault }, t("Gerzy's deck logo")),
         h('span', { class: 'rm-grow' }),
         h('button', { class: 'rm-btn is-sm is-primary', type: 'button', disabled: !bootLogo.file || bootLogo.busy || state.connected === false, onclick: upload },
-          bootLogo.busy ? 'Nahrávám… (asi 7 s)' : 'Nahrát do decku')),
-      bootLogo.busy && h('div', { class: 'rm-note is-info' }, 'Během nahrávání deck neodpojuj.'),
+          bootLogo.busy ? t("Uploading… (about 7 s)") : t("Upload to deck"))),
+      bootLogo.busy && h('div', { class: 'rm-note is-info' }, t("Don't unplug the deck while uploading.")),
       input));
 }
 
@@ -674,7 +682,7 @@ async function startCalibration() {
 }
 
 function endCalibration(saveIt) {
-  if (saveIt) { config.keyMap = calibration.map; save(); toast('Kalibrace uložena.'); }
+  if (saveIt) { config.keyMap = calibration.map; save(); toast(t("Calibration saved.")); }
   calibration = null;
   invoke('set_calibrating', { on: false }).catch(toast);
   renderSettings();
@@ -688,9 +696,9 @@ function calibrationPanel() {
   }
   return h('div', { class: 'rm-panel' },
     h('div', { class: 'rm-panel-head' }, h('h2', {}, `Kalibrace — ${calibration.step} / 15`),
-      h('div', { class: 'rm-end' }, h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => endCalibration(false) }, 'Zrušit'))),
+      h('div', { class: 'rm-end' }, h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => endCalibration(false) }, t("Cancel")))),
     h('div', { class: 'rm-panel-body rm-stack' },
-      h('div', { class: 'rm-note is-info' }, 'Zmáčkni na decku tlačítko, které je tady zvýrazněné. Během kalibrace tlačítka nic nespouštějí.'),
+      h('div', { class: 'rm-note is-info' }, t("Press the key on the deck that is highlighted here. Keys don't run anything during calibration.")),
       h('div', { class: 'cal-grid' }, grid)));
 }
 
@@ -741,6 +749,8 @@ function applyTheme(choice) {
 const ui = { h, invoke, toast, svgIcon, save: () => save(), saveNow: () => saveNow(), renderDeck: () => renderDeck() };
 
 async function boot() {
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  document.documentElement.lang = lang;
   let theme = 'auto';
   try { theme = localStorage.getItem('deck-theme') ?? 'auto'; } catch { /* ignore */ }
   applyTheme(theme);
@@ -755,9 +765,11 @@ async function boot() {
   try {
     [config, state, allCodes] = await Promise.all([invoke('get_config'), invoke('get_state'), invoke('list_scancodes')]);
   } catch (e) {
-    $('page-deck').replaceChildren(h('div', { class: 'rm-note is-warn' }, `Nepodařilo se spojit s jádrem programu: ${e}`));
+    $('page-deck').replaceChildren(h('div', { class: 'rm-note is-warn' }, t("Could not connect to the program core: {0}", e)));
     return;
   }
+  // the config is the source of truth for the language; modules translated with the cached one
+  if ((config.language ?? 'en') !== lang) { setLang(config.language ?? 'en'); location.reload(); return; }
   // a reload must not leave the core stuck in calibration mode
   invoke('set_calibrating', { on: false }).catch(() => {});
   loadInstalled(ui).then(() => { if (page === 'deck') renderDeck(); });

@@ -1,13 +1,14 @@
 // Plugins: page (installed + catalogues), action picker, property-inspector panel.
 // `ui` is supplied by app.js: { h, invoke, toast, svgIcon, getConfig, save, renderDeck }.
+import { t } from './i18n.js';
 
-const WARNING = 'Pluginy jsou programy třetích stran a mají plný přístup k tvému počítači. Instaluj jen ty, kterým věříš.';
+const WARNING = t("Plugins are third-party programs with full access to your computer. Only install the ones you trust.");
 const STATUS = {
-  running: ['Běží', 'ok'],
-  starting: ['Startuje…', 'warn'],
-  crashed: ['Spadl', 'bad'],
-  missingNode: ['Chybí Node.js', 'bad'],
-  notInstalled: ['Není nainstalovaný', 'bad'],
+  running: [t("Running"), 'ok'],
+  starting: [t("Starting…"), 'warn'],
+  crashed: [t("Crashed"), 'bad'],
+  missingNode: [t("Node.js missing"), 'bad'],
+  notInstalled: [t("Not installed"), 'bad'],
 };
 
 let installed = null; // [{ id, name, version, author, icon, status, actions:[{uuid,name,icon,tooltip}] }]
@@ -64,7 +65,7 @@ function draw(ui, root) {
     if (!f) return;
     await withBusy(ui, root, 'file', async () => {
       await ui.invoke('plugins_install_file', new Uint8Array(await f.arrayBuffer()));
-      ui.toast(`Plugin ${f.name} nainstalován.`);
+      ui.toast(t("Plugin {0} installed.", f.name));
     });
   } });
 
@@ -77,15 +78,15 @@ function draw(ui, root) {
           h('b', {}, p.name),
           h('span', { class: 'rm-meta' }, `${p.author || ''} · ${p.version || ''}`),
           h('div', { class: 'rm-row', style: 'gap:6px' }, statusChip(ui, p.status),
-            h('span', { class: 'rm-meta' }, `${p.actions.length} akcí`))),
+            h('span', { class: 'rm-meta' }, t("{0} actions", p.actions.length)))),
         h('div', { class: 'plug-actions' },
           h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => ui.invoke('open_plugin_log', { id: p.id }).catch(ui.toast) }, 'Log'),
           h('button', { class: 'rm-btn is-sm is-ghost is-danger', type: 'button', disabled: busy.has(p.id), onclick: async () => {
             if (!removing) { pendingRemove = p.id; draw(ui, root); setTimeout(() => { if (pendingRemove === p.id) { pendingRemove = null; draw(ui, root); } }, 3000); return; }
             pendingRemove = null;
             await withBusy(ui, root, p.id, () => ui.invoke('plugins_uninstall', { id: p.id }));
-          } }, removing ? 'Opravdu?' : 'Odinstalovat')));
-    }) : h('div', { class: 'rm-meta' }, 'Zatím žádný plugin. Vyber si z katalogu níž.'));
+          } }, removing ? t("Sure?") : t("Uninstall"))));
+    }) : h('div', { class: 'rm-meta' }, t("No plugins yet. Pick one from the catalogue below.")));
 
   const q = query.trim().toLowerCase();
   const matches = (e) => !q || e.name.toLowerCase().includes(q) || (e.author ?? '').toLowerCase().includes(q) || e.id.toLowerCase().includes(q);
@@ -100,28 +101,28 @@ function draw(ui, root) {
           h('div', { class: 'plug-text' }, h('b', {}, e.name), h('span', { class: 'rm-meta' }, e.author || '')),
           h('div', { class: 'plug-actions' },
             h('button', { class: `rm-btn is-sm ${isIn ? 'is-ghost' : ''}`, type: 'button', disabled: busy.has(e.id), onclick: () => install(ui, root, e) },
-              busy.has(e.id) ? 'Instaluji…' : isIn ? 'Přeinstalovat' : 'Instalovat')));
+              busy.has(e.id) ? t("Installing…") : isIn ? t("Reinstall") : t("Install"))));
       })),
-      !q && list.length > 60 && h('div', { class: 'rm-meta' }, `…a dalších ${list.length - 60}. Použij hledání.`));
+      !q && list.length > 60 && h('div', { class: 'rm-meta' }, t("…and {0} more. Use the search.", list.length - 60)));
   };
 
-  const search = h('input', { class: 'rm-input', type: 'search', placeholder: 'Hledat plugin (OBS, Spotify, Discord, CPU…)', value: query,
+  const search = h('input', { class: 'rm-input', type: 'search', placeholder: t("Search plugins (OBS, Spotify, Discord, CPU…)"), value: query,
     oninput: (e) => { query = e.target.value; draw(ui, root); const s = root.querySelector('input[type=search]'); s.focus(); s.setSelectionRange(query.length, query.length); } });
 
   root.replaceChildren(h('div', { class: 'rm-stack' },
     h('div', { class: 'rm-panel' },
-      h('div', { class: 'rm-panel-head' }, h('h2', {}, 'Nainstalované'),
+      h('div', { class: 'rm-panel-head' }, h('h2', {}, t("Installed")),
         h('div', { class: 'rm-end' },
-          h('button', { class: 'rm-btn is-sm', type: 'button', disabled: busy.has('file'), onclick: () => fileInput.click() }, 'Instalovat ze souboru…'),
-          h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: async () => { await loadInstalled(ui); draw(ui, root); } }, 'Obnovit'))),
+          h('button', { class: 'rm-btn is-sm', type: 'button', disabled: busy.has('file'), onclick: () => fileInput.click() }, t("Install from file…")),
+          h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: async () => { await loadInstalled(ui); draw(ui, root); } }, t("Refresh")))),
       h('div', { class: 'rm-panel-body' }, installedGrid, fileInput)),
     h('div', { class: 'rm-note is-warn' }, WARNING),
     search,
     catalog ? [
-      catalog.errors?.length ? h('div', { class: 'rm-note is-warn' }, `Katalog se nepodařilo načíst celý: ${catalog.errors.join('; ')}`) : null,
-      section('Open-source pluginy (OpenAction)', 'openAction'),
-      section('Archiv obchodu Elgato', 'elgatoArchive'),
-    ] : h('div', { class: 'rm-meta' }, 'Načítám katalogy…')));
+      catalog.errors?.length ? h('div', { class: 'rm-note is-warn' }, t("Could not load the whole catalogue: {0}", catalog.errors.join('; '))) : null,
+      section(t("Open-source plugins (OpenAction)"), 'openAction'),
+      section(t("Elgato store archive"), 'elgatoArchive'),
+    ] : h('div', { class: 'rm-meta' }, t("Loading catalogues…"))));
 }
 
 async function withBusy(ui, root, id, fn) {
@@ -146,7 +147,7 @@ async function install(ui, root, entry) {
       if (!asset) return;
       res = await ui.invoke('plugins_install', { id: entry.id, source: entry.source, assetUrl: asset.url });
     }
-    ui.toast(`Plugin ${entry.name} nainstalován.`);
+    ui.toast(t("Plugin {0} installed.", entry.name));
   });
 }
 
@@ -156,10 +157,10 @@ function chooseAsset(ui, assets) {
     const close = (v) => { overlay.remove(); resolve(v); };
     const overlay = h('div', { class: 'modal-back', onclick: (e) => { if (e.target === overlay) close(null); } },
       h('div', { class: 'rm-panel modal' },
-        h('div', { class: 'rm-panel-head' }, h('h2', {}, 'Vyber soubor pluginu')),
+        h('div', { class: 'rm-panel-head' }, h('h2', {}, t("Choose a plugin file"))),
         h('div', { class: 'rm-panel-body rm-stack', style: 'gap:6px' },
           assets.map((a) => h('button', { class: 'tpl-item', type: 'button', onclick: () => close(a) }, a.name)),
-          h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => close(null) }, 'Zrušit'))));
+          h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => close(null) }, t("Cancel")))));
     document.body.append(overlay);
   });
 }
@@ -191,13 +192,13 @@ export function pickPluginAction(ui) {
           isOpen && actions.map((a) => h('button', { class: 'tpl-item', type: 'button', title: a.tooltip || '', onclick: () => close({ plugin: p.id, action: a.uuid }) },
             h('span', { class: 'tpl-name' }, h('img', { class: 'tpl-icon', src: a.icon, alt: '' }), a.name))));
       }) : [
-        h('div', { class: 'rm-meta' }, installedPlugins().length ? 'Nic nenalezeno.' : 'Nemáš nainstalovaný žádný plugin. Najdeš je na stránce Pluginy.')]));
+        h('div', { class: 'rm-meta' }, installedPlugins().length ? t("Nothing found.") : t("You have no plugins installed. You'll find them on the Plugins page."))]));
     };
-    const search = h('input', { class: 'rm-input', type: 'search', placeholder: 'Hledat akci…', oninput: (e) => { q = e.target.value; draw(); } });
+    const search = h('input', { class: 'rm-input', type: 'search', placeholder: t("Search actions…"), oninput: (e) => { q = e.target.value; draw(); } });
     const overlay = h('div', { class: 'modal-back', onclick: (e) => { if (e.target === overlay) close(null); } },
       h('div', { class: 'rm-panel modal' },
-        h('div', { class: 'rm-panel-head' }, h('h2', {}, 'Akce z pluginu'),
-          h('div', { class: 'rm-end' }, h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => close(null) }, 'Zavřít'))),
+        h('div', { class: 'rm-panel-head' }, h('h2', {}, t("Plugin actions")),
+          h('div', { class: 'rm-end' }, h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => close(null) }, t("Close")))),
         h('div', { class: 'rm-panel-body rm-stack' }, search, list)));
     document.body.append(overlay);
     draw();
@@ -223,24 +224,24 @@ export function pluginActionFields(ui, profileId, key, cfg, onChange) {
     action?.icon ? h('img', { class: 'plug-icon', src: action.icon, alt: '' }) : null,
     h('div', { class: 'plug-text' },
       h('b', {}, action?.name ?? a.action),
-      h('span', { class: 'rm-meta' }, plugin ? plugin.name : `Plugin ${a.plugin} není nainstalovaný`)),
+      h('span', { class: 'rm-meta' }, plugin ? plugin.name : t("Plugin {0} is not installed", a.plugin))),
     h('button', { class: 'rm-btn is-sm', type: 'button', onclick: async () => {
       const pick = await pickPluginAction(ui);
       if (pick) { cfg.action = { type: 'plugin', plugin: pick.plugin, action: pick.action, settings: {}, state: 0 }; onChange(true); }
-    } }, 'Změnit'));
-  if (!plugin) return [head, h('div', { class: 'rm-note is-warn' }, 'Plugin chybí. Nainstaluj ho znovu na stránce Pluginy a akce i nastavení se vrátí.')];
+    } }, t("Change")));
+  if (!plugin) return [head, h('div', { class: 'rm-note is-warn' }, t("The plugin is missing. Reinstall it on the Plugins page and the action and its settings come back."))];
 
   const alignRow = h('label', { class: 'rm-field' },
-    h('span', { class: 'rm-label' }, 'Pozice hodnoty na tlačítku'),
+    h('span', { class: 'rm-label' }, t("Value position on the key")),
     h('select', { class: 'rm-select', onchange: (e) => { cfg.titleAlign = e.target.value || null; onChange(false); } },
-      [['', 'Podle pluginu'], ['top', 'Nahoře'], ['middle', 'Uprostřed'], ['bottom', 'Dole']]
+      [['', t("As the plugin says")], ['top', t("Top")], ['middle', t("Middle")], ['bottom', t("Bottom")]]
         .map(([v, l]) => h('option', { value: v, selected: (cfg.titleAlign ?? '') === v }, l))));
-  const frame = h('iframe', { class: 'pi-frame', title: 'Nastavení akce pluginu' });
-  const note = h('div', { class: 'rm-meta' }, 'Načítám nastavení pluginu…');
+  const frame = h('iframe', { class: 'pi-frame', title: t("Plugin action settings") });
+  const note = h('div', { class: 'rm-meta' }, t("Loading plugin settings…"));
   closePi(ui);
   // the core must know this key's current action first, or it opens the previous action's page
   ui.saveNow().then(() => ui.invoke('pi_open', { profileId, key })).then((pi) => {
-    if (!pi) { note.textContent = 'Tahle akce nemá žádné nastavení.'; frame.remove(); return; }
+    if (!pi) { note.textContent = t("This action has no settings."); frame.remove(); return; }
     openPi = pi.context ?? `${profileId}:${key}`;
     frame.src = pi.url;
     frame.onload = () => note.remove();
