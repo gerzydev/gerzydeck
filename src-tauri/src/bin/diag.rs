@@ -60,6 +60,7 @@ fn main() {
                 print!("raw id=0x{device_id:02x} {} ", if pressed { "down" } else { "up  " });
             }
             DeviceEvent::Key { key, .. } => println!("→ logická klávesa {key}"),
+            DeviceEvent::Redraw => {}
         }
     }
 }

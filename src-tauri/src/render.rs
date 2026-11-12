@@ -254,6 +254,37 @@ pub fn encode_tile(canvas: &RgbImage) -> Vec<u8> {
     clean_baseline_jpeg(&jpeg)
 }
 
+pub const BOOT_LOGO_W: u32 = 800;
+pub const BOOT_LOGO_H: u32 = 480;
+
+/// Any image → the deck's boot logo: 800×480 cover crop, rotated 180°, baseline JFIF JPEG,
+/// quality lowered until it fits the 16-bit length of the LOG command.
+pub fn boot_logo_jpeg(bytes: &[u8]) -> Result<Vec<u8>, RenderError> {
+    if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
+        return Err(RenderError::BadImage("Obrázek chybí nebo je větší než 20 MB".into()));
+    }
+    let img = decode(bytes).ok_or_else(|| RenderError::BadImage("Soubor není podporovaný obrázek".into()))?;
+    let canvas = img.resize_to_fill(BOOT_LOGO_W, BOOT_LOGO_H, FilterType::Lanczos3).to_rgb8();
+    let rotated = imageops::rotate180(&canvas);
+    // very detailed pictures: soften them a little as a last resort
+    let softened = [None, Some(1.0f32), Some(2.0)];
+    for sigma in softened {
+        let src = match sigma {
+            Some(s) => imageops::blur(&rotated, s),
+            None => rotated.clone(),
+        };
+        for quality in [92u8, 85, 75, 65, 55, 45, 35, 25, 15] {
+            let mut jpeg = Vec::new();
+            JpegEncoder::new_with_quality(&mut jpeg, quality).encode_image(&src).map_err(|e| RenderError::BadImage(e.to_string()))?;
+            let jpeg = clean_baseline_jpeg(&jpeg);
+            if jpeg.len() <= 0xFFFF {
+                return Ok(jpeg);
+            }
+        }
+    }
+    Err(RenderError::BadImage("Obrázek se nedá zmenšit pod 64 kB, zkus jednodušší".into()))
+}
+
 /// Standard JFIF 1.01 APP0, no thumbnail. The D6 decoder rejects JPEGs without it.
 const JFIF_APP0: [u8; 18] = [0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00];
 
@@ -454,6 +485,34 @@ mod preview {
     use super::*;
 
     /// `cargo test --lib render::preview -- --ignored` writes key previews to %TEMP%\deck-preview.png
+    #[test]
+    fn boot_logo_is_800x480_rotated_jfif_and_small_enough() {
+        // left half red, right half blue, 1600×1200 (4:3) → cover-cropped to 5:3
+        let src = image::RgbImage::from_fn(1600, 1200, |x, _| if x < 800 { Rgb([255, 0, 0]) } else { Rgb([0, 0, 255]) });
+        let mut png = Vec::new();
+        image::DynamicImage::from(src).write_to(&mut Cursor::new(&mut png), ImageFormat::Png).unwrap();
+        let jpeg = boot_logo_jpeg(&png).unwrap();
+        assert_eq!(&jpeg[2..11], &JFIF_APP0[..9]);
+        assert!(jpeg.len() <= 0xFFFF);
+        let img = image::load_from_memory(&jpeg).unwrap().to_rgb8();
+        assert_eq!(img.dimensions(), (800, 480));
+        // rotated 180°: the red (left) half now sits on the right
+        assert!(img.get_pixel(780, 240)[0] > 200 && img.get_pixel(20, 240)[2] > 200);
+    }
+
+    #[test]
+    fn boot_logo_noise_still_fits_64k() {
+        let mut seed = 1u32;
+        let src = image::RgbImage::from_fn(800, 480, |_, _| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            Rgb([(seed >> 24) as u8, (seed >> 16) as u8, (seed >> 8) as u8])
+        });
+        let mut png = Vec::new();
+        image::DynamicImage::from(src).write_to(&mut Cursor::new(&mut png), ImageFormat::Png).unwrap();
+        assert!(boot_logo_jpeg(&png).unwrap().len() <= 0xFFFF);
+        assert!(boot_logo_jpeg(b"nope").is_err());
+    }
+
     #[test]
     #[ignore]
     fn write_preview() {

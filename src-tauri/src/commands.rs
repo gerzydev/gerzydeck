@@ -53,6 +53,18 @@ pub async fn set_calibrating(tx: tauri::State<'_, EngineTx>, on: bool) -> Result
 }
 
 /// Raw body: `invoke('import_image', uint8Array)`.
+/// Any image → boot logo in the deck's flash (takes ~7 s: the deck needs pauses).
+#[tauri::command]
+pub async fn set_boot_logo(tx: tauri::State<'_, EngineTx>, request: Request<'_>) -> Result<(), String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Očekávám data obrázku".into());
+    };
+    let jpeg = crate::render::boot_logo_jpeg(bytes).map_err(|e| e.to_string())?;
+    let (r, rx) = channel();
+    tx.0.send(Msg::SetBootLogo { jpeg, reply: r }).map_err(|_| "Jádro programu neběží".to_string())?;
+    rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "Deck neodpověděl".to_string())?
+}
+
 #[tauri::command]
 pub async fn import_image(tx: tauri::State<'_, EngineTx>, request: Request<'_>) -> Result<String, String> {
     let InvokeBody::Raw(bytes) = request.body() else {

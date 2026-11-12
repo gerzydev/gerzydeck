@@ -51,6 +51,31 @@ pub fn image_upload(key: u8, jpeg: &[u8]) -> Vec<Vec<u8>> {
     out
 }
 
+/// Boot logo (800×480 JPEG, already rotated 180°), stored in the deck's flash.
+/// Layout copied from the official Fifine app: "CRT\0\0LOG\0\0" + big-endian length, then the JPEG
+/// in zero-padded 1024-byte packets. The device needs ~3 s between the command and the data,
+/// answers "ACK\0\0OK" when done, then gets STP (see device.rs).
+pub fn boot_logo(jpeg: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u8>>), String> {
+    if jpeg.len() < 4 || jpeg[..3] != [0xFF, 0xD8, 0xFF] {
+        return Err("Boot logo musí být JPEG".into());
+    }
+    // the official app sent 2 length bytes; stay inside them
+    if jpeg.len() > 0xFFFF {
+        return Err("Boot logo je moc velké (max 64 kB)".into());
+    }
+    let len = jpeg.len() as u16;
+    let cmd = command(&[b'L', b'O', b'G', 0, 0, (len >> 8) as u8, len as u8]);
+    let packets = jpeg
+        .chunks(PACKET_SIZE)
+        .map(|c| {
+            let mut p = vec![0u8; PACKET_SIZE];
+            p[..c.len()].copy_from_slice(c);
+            p
+        })
+        .collect();
+    Ok((cmd, packets))
+}
+
 pub fn init_sequence(level: u8) -> Vec<Vec<u8>> {
     vec![connect(), blef(), mode(), wake(), brightness(level), clear(), stop()]
 }
@@ -93,6 +118,27 @@ pub fn parse_input(buf: &[u8], key_map: Option<&[u8; 15]>) -> Option<Input> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boot_logo_packets_match_the_official_app_byte_for_byte() {
+        // captured from the Fifine app (USBPcap) while it replaced the boot logo
+        let jpeg = include_bytes!("../tests/fixtures/bootlogo.jpg");
+        let cmd = include_bytes!("../tests/fixtures/bootlogo-cmd.bin");
+        let data = include_bytes!("../tests/fixtures/bootlogo-data.bin");
+        let (c, packets) = boot_logo(jpeg).unwrap();
+        assert_eq!(c.as_slice(), cmd.as_slice());
+        assert_eq!(packets.len(), 47);
+        assert!(packets.iter().all(|p| p.len() == PACKET_SIZE));
+        assert_eq!(packets.concat().as_slice(), data.as_slice());
+    }
+
+    #[test]
+    fn boot_logo_rejects_non_jpeg_and_oversized_data() {
+        assert!(boot_logo(b"not a jpeg").is_err());
+        let mut big = vec![0xFF, 0xD8, 0xFF];
+        big.resize(70_000, 0);
+        assert!(boot_logo(&big).is_err());
+    }
 
     fn crt(s: &[u8]) -> Vec<u8> {
         let mut v = b"CRT\0\0".to_vec();

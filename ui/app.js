@@ -618,9 +618,53 @@ function renderSettings() {
         h('button', { class: 'rm-btn is-sm', type: 'button', onclick: startCalibration }, 'Spustit kalibraci'))),
     h('div', {}, h('b', {}, 'Data'), h('code', {}, '%APPDATA%\\GerzysDeck')));
 
-  const parts = [h('div', { class: 'rm-panel' }, h('div', { class: 'rm-panel-body', style: 'padding-top:8px' }, rows))];
+  const parts = [h('div', { class: 'rm-panel' }, h('div', { class: 'rm-panel-body', style: 'padding-top:8px' }, rows)), bootLogoPanel()];
   if (calibration) parts.push(calibrationPanel());
   $('page-settings').replaceChildren(h('div', { class: 'rm-stack' }, parts));
+}
+
+// ---------- boot logo ----------
+let bootLogo = { file: null, url: null, busy: false };
+
+function bootLogoPanel() {
+  const input = h('input', { type: 'file', accept: 'image/*', hidden: true, onchange: (e) => pickBoot(e.target.files[0]) });
+  function pickBoot(file) {
+    if (!file) return;
+    if (bootLogo.url) URL.revokeObjectURL(bootLogo.url);
+    bootLogo = { file, url: URL.createObjectURL(file), busy: false };
+    renderSettings();
+  }
+  async function useDefault() {
+    const blob = await (await fetch('boot-default.png')).blob();
+    pickBoot(new File([blob], 'gerzys-deck-boot.png', { type: 'image/png' }));
+  }
+  async function upload() {
+    bootLogo.busy = true;
+    renderSettings();
+    try {
+      await invoke('set_boot_logo', new Uint8Array(await bootLogo.file.arrayBuffer()));
+      toast('Boot logo je uložené v decku. Ukáže se po příštím zapojení.');
+    } catch (e) { toast(e); }
+    bootLogo.busy = false;
+    renderSettings();
+  }
+  const preview = h('div', { class: 'boot-prev',
+    ondragover: (e) => { e.preventDefault(); },
+    ondrop: (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type.startsWith('image/')) pickBoot(f); } },
+  bootLogo.url ? h('img', { src: bootLogo.url, alt: '' }) : h('span', { class: 'rm-meta' }, 'Sem přetáhni obrázek'));
+  return h('div', { class: 'rm-panel' },
+    h('div', { class: 'rm-panel-head' }, h('h2', {}, 'Boot logo')),
+    h('div', { class: 'rm-panel-body rm-stack' },
+      h('span', { class: 'rm-meta' }, 'Obrázek, který deck ukáže po zapojení, než se připojí program. Ořízne se na 800 × 480 a uloží přímo do decku.'),
+      preview,
+      h('div', { class: 'rm-row', style: 'flex-wrap:wrap' },
+        h('button', { class: 'rm-btn is-sm', type: 'button', disabled: bootLogo.busy, onclick: () => input.click() }, 'Vybrat obrázek…'),
+        h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', disabled: bootLogo.busy, onclick: useDefault }, 'Logo Gerzy\'s deck'),
+        h('span', { class: 'rm-grow' }),
+        h('button', { class: 'rm-btn is-sm is-primary', type: 'button', disabled: !bootLogo.file || bootLogo.busy || state.connected === false, onclick: upload },
+          bootLogo.busy ? 'Nahrávám… (asi 7 s)' : 'Nahrát do decku')),
+      bootLogo.busy && h('div', { class: 'rm-note is-info' }, 'Během nahrávání deck neodpojuj.'),
+      input));
 }
 
 async function startCalibration() {

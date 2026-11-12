@@ -303,6 +303,7 @@ fn main() {
             commands::set_config,
             commands::set_active_profile,
             commands::swap_keys,
+            commands::set_boot_logo,
             commands::set_calibrating,
             commands::import_image,
             commands::image_data_url,

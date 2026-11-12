@@ -105,6 +105,8 @@ impl PluginView {
 
 pub enum Msg {
     Device(DeviceEvent),
+    /// boot logo JPEG (already 800×480, rotated) for the deck's flash; the device thread answers
+    SetBootLogo { jpeg: Vec<u8>, reply: Sender<Result<(), String>> },
     /// fresh numbers from the usage poller
     Usage { provider: String, result: Result<crate::usage::Usage, String> },
     /// which usage providers have a key on the active profile
@@ -717,6 +719,11 @@ impl Engine {
                 self.host(HostCmd::DeviceDisconnected);
             }
             Msg::Device(DeviceEvent::Raw { device_id, pressed }) => self.sink.raw(device_id, pressed),
+            Msg::Device(DeviceEvent::Redraw) => {
+                self.rendered.clear();
+                self.last_frame.clear();
+                self.render_active();
+            }
             Msg::Device(DeviceEvent::Key { key, pressed }) => self.on_key(key, pressed),
             Msg::Plugin(ev) => self.on_plugin(ev),
             Msg::SwapKeys { profile_id, a, b, reply } => {
@@ -739,6 +746,13 @@ impl Engine {
                 }
             }
             Msg::Tick => self.on_tick(),
+            Msg::SetBootLogo { jpeg, reply } => {
+                if !self.state.connected {
+                    let _ = reply.send(Err("Deck není připojený".into()));
+                } else if let Err(std::sync::mpsc::SendError(DeviceCmd::SetBootLogo { reply, .. })) = self.device_tx.send(DeviceCmd::SetBootLogo { jpeg, reply }) {
+                    let _ = reply.send(Err("Ovladač decku neběží".into()));
+                }
+            }
             Msg::Usage { provider, result } => {
                 // keep showing the last numbers when a refresh fails for network reasons
                 let keep = matches!((&result, self.usage.get(&provider)), (Err(e), Some(Ok(_))) if e.contains("internet") || e.contains("dotaz"));

@@ -22,6 +22,8 @@ pub enum DeviceEvent {
     Disconnected,
     Key { key: u8, pressed: bool },
     Raw { device_id: u8, pressed: bool },
+    /// the deck cleared its keys (after a boot logo upload): send every image again
+    Redraw,
 }
 
 #[derive(Debug)]
@@ -29,6 +31,8 @@ pub enum DeviceCmd {
     SetImages(Vec<(u8, Vec<u8>)>),
     SetBrightness(u8),
     SetKeyMap(Option<[u8; 15]>),
+    /// Writes the boot logo (800×480 JPEG, rotated) into the deck's flash.
+    SetBootLogo { jpeg: Vec<u8>, reply: Sender<Result<(), String>> },
     Stop,
 }
 
@@ -39,6 +43,10 @@ pub struct DeckOptions {
     pub heartbeat: Duration,
     pub reconnect: Duration,
     pub brightness: u8,
+    /// pause between the LOG command and its data (the deck prepares its flash)
+    pub logo_erase_wait: Duration,
+    /// how long to wait for the deck's ACK after the logo data
+    pub logo_ack_timeout: Duration,
 }
 
 impl Default for DeckOptions {
@@ -49,6 +57,8 @@ impl Default for DeckOptions {
             heartbeat: Duration::from_secs(2),
             reconnect: Duration::from_secs(2),
             brightness: 80,
+            logo_erase_wait: Duration::from_secs(3),
+            logo_ack_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -126,8 +136,65 @@ impl<B: HidBackend> Worker<B> {
             DeviceCmd::SetBrightness(b) => self.opts.brightness = b,
             DeviceCmd::SetKeyMap(m) => self.key_map = m,
             DeviceCmd::SetImages(_) => {} // engine re-sends everything on Connected
+            DeviceCmd::SetBootLogo { reply, .. } => {
+                let _ = reply.send(Err("Deck není připojený".into()));
+            }
         }
         true
+    }
+
+    /// Forwards a key report read while a long operation runs; true when it was the deck's ACK.
+    fn handle_read(&self, data: &[u8]) -> bool {
+        match protocol::parse_input(data, self.key_map.as_ref()) {
+            Some(Input::Ack) => true,
+            Some(Input::Key { device_id, key, pressed }) => {
+                let _ = self.events.send(DeviceEvent::Raw { device_id, pressed });
+                let _ = self.events.send(DeviceEvent::Key { key, pressed });
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Reads for `dur`, forwarding keys; with `until_ack` returns early (Ok(true)) on the deck's ACK.
+    fn read_for(&self, port: &mut dyn HidPort, dur: Duration, until_ack: bool) -> anyhow::Result<bool> {
+        let deadline = Instant::now() + dur;
+        let mut buf = [0u8; 513];
+        while Instant::now() < deadline {
+            let n = port.read_timeout(&mut buf, 20)?;
+            if n > 0 && self.handle_read(&buf[..n]) && until_ack {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// The official app's sequence: STP, LOG + length, ~3 s pause, data, ACK from the deck, STP,
+    /// then (after another pause) CLE ×2 — the keys are blank afterwards and must be redrawn.
+    /// Err(None) = the port failed (disconnected), Err(Some(msg)) = the deck refused / did not answer.
+    fn write_boot_logo(&self, port: &mut dyn HidPort, jpeg: &[u8]) -> Result<(), Option<String>> {
+        let (cmd, packets) = protocol::boot_logo(jpeg).map_err(Some)?;
+        let io = |e: anyhow::Error| {
+            log::warn!("deck write failed during boot logo: {e}");
+            None
+        };
+        log::info!("boot logo: sending {} bytes", jpeg.len());
+        port.write(&self.frame(&protocol::stop())).map_err(io)?;
+        port.write(&self.frame(&cmd)).map_err(io)?;
+        self.read_for(port, self.opts.logo_erase_wait, false).map_err(io)?;
+        for p in &packets {
+            port.write(&self.frame(p)).map_err(io)?;
+        }
+        let acked = self.read_for(port, self.opts.logo_ack_timeout, true).map_err(io)?;
+        port.write(&self.frame(&protocol::stop())).map_err(io)?;
+        if !acked {
+            return Err(Some("Deck nepotvrdil uložení loga".into()));
+        }
+        self.read_for(port, self.opts.logo_erase_wait, false).map_err(io)?;
+        port.write(&self.frame(&protocol::clear())).map_err(io)?;
+        port.write(&self.frame(&protocol::clear())).map_err(io)?;
+        log::info!("boot logo: stored");
+        Ok(())
     }
 
     fn run(mut self) {
@@ -165,10 +232,16 @@ impl<B: HidBackend> Worker<B> {
         let mut pending: BTreeMap<u8, Vec<u8>> = BTreeMap::new();
         let mut last_heartbeat = Instant::now();
         let mut buf = [0u8; 513];
+        let mut logo: Option<(Vec<u8>, Sender<Result<(), String>>)> = None;
         loop {
             loop {
                 match self.cmds.try_recv() {
                     Ok(DeviceCmd::SetImages(images)) => pending.extend(images),
+                    Ok(DeviceCmd::SetBootLogo { jpeg, reply }) => {
+                        if let Some((_, old)) = logo.replace((jpeg, reply)) {
+                            let _ = old.send(Err("Nahrazeno novějším logem".into()));
+                        }
+                    }
                     Ok(DeviceCmd::SetBrightness(b)) => {
                         self.opts.brightness = b;
                         queue.push_back(protocol::brightness(b));
@@ -180,6 +253,26 @@ impl<B: HidBackend> Worker<B> {
                         return Exit::Stop;
                     }
                     Err(TryRecvError::Empty) => break,
+                }
+            }
+            // the logo goes out between batches, never in the middle of an image upload
+            if queue.is_empty() {
+                if let Some((jpeg, reply)) = logo.take() {
+                    match self.write_boot_logo(&mut *port, &jpeg) {
+                        Ok(()) => {
+                            let _ = reply.send(Ok(()));
+                            let _ = self.events.send(DeviceEvent::Redraw);
+                        }
+                        Err(Some(msg)) => {
+                            let _ = reply.send(Err(msg));
+                            let _ = self.events.send(DeviceEvent::Redraw);
+                        }
+                        Err(None) => {
+                            let _ = reply.send(Err("Deck se během nahrávání odpojil".into()));
+                            return Exit::Disconnected;
+                        }
+                    }
+                    last_heartbeat = Instant::now() - self.opts.heartbeat;
                 }
             }
             if last_heartbeat.elapsed() >= self.opts.heartbeat {
@@ -408,5 +501,62 @@ mod tests {
         stop(ctx, h);
         let w = b.ports.lock().unwrap()[0].writes.lock().unwrap().clone();
         assert_eq!(&w.last().unwrap()[6..9], b"SLP");
+    }
+
+    fn logo_opts() -> DeckOptions {
+        DeckOptions { heartbeat: Duration::from_secs(60), logo_erase_wait: Duration::from_millis(40), logo_ack_timeout: Duration::from_millis(300), ..opts() }
+    }
+
+    #[test]
+    fn boot_logo_follows_the_official_sequence() {
+        let (b, ctx, erx, h) = start(logo_opts());
+        std::thread::sleep(Duration::from_millis(30));
+        let port = b.ports.lock().unwrap()[0].clone();
+        port.writes.lock().unwrap().clear();
+        let jpeg = include_bytes!("../tests/fixtures/bootlogo.jpg").to_vec();
+        let (r, rx) = channel();
+        ctx.send(DeviceCmd::SetBootLogo { jpeg, reply: r }).unwrap();
+        // the device answers once the data is in
+        std::thread::sleep(Duration::from_millis(80));
+        port.reads.lock().unwrap().push_back(report(0, 0));
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), Ok(()));
+        wait_for(&erx, DeviceEvent::Redraw);
+        let w = port.writes.lock().unwrap().clone();
+        let names: Vec<String> = w.iter().map(|p| if &p[1..4] == b"CRT" { String::from_utf8_lossy(&p[6..9]).into_owned() } else { "data".into() }).collect();
+        let first = names.iter().position(|n| n == "LOG").unwrap();
+        assert_eq!(names[first - 1], "STP");
+        assert!(names[first + 1..first + 48].iter().all(|n| n == "data"));
+        assert_eq!(names[first + 48], "STP");
+        assert_eq!(&names[first + 49..first + 51], ["CLE", "CLE"]);
+        // exactly the captured bytes, behind the HID report id
+        assert_eq!(&w[first][1..], include_bytes!("../tests/fixtures/bootlogo-cmd.bin").as_slice());
+        let data: Vec<u8> = w[first + 1..first + 48].iter().flat_map(|p| p[1..].to_vec()).collect();
+        assert_eq!(data.as_slice(), include_bytes!("../tests/fixtures/bootlogo-data.bin").as_slice());
+        stop(ctx, h);
+    }
+
+    #[test]
+    fn boot_logo_without_ack_reports_an_error() {
+        let (_b, ctx, _erx, h) = start(logo_opts());
+        let (r, rx) = channel();
+        ctx.send(DeviceCmd::SetBootLogo { jpeg: include_bytes!("../tests/fixtures/bootlogo.jpg").to_vec(), reply: r }).unwrap();
+        assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_err());
+        stop(ctx, h);
+    }
+
+    #[test]
+    fn boot_logo_while_disconnected_is_refused() {
+        let (etx, _erx) = channel();
+        struct NoDeck;
+        impl HidBackend for NoDeck {
+            fn find(&mut self) -> Option<Box<dyn HidPort>> {
+                None
+            }
+        }
+        let (ctx, h) = spawn_device(NoDeck, opts(), etx);
+        let (r, rx) = channel();
+        ctx.send(DeviceCmd::SetBootLogo { jpeg: vec![0xFF, 0xD8, 0xFF, 0], reply: r }).unwrap();
+        assert!(rx.recv_timeout(Duration::from_secs(2)).unwrap().is_err());
+        stop(ctx, h);
     }
 }
