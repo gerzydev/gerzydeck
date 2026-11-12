@@ -76,8 +76,10 @@ fn device_info(device: &str) -> Value {
 
 /// The `-info` argument / `info` passed to `connectElgatoStreamDeckSocket`.
 pub fn info_json(device: &str, plugin_uuid: &str, plugin_version: &str) -> Value {
+    // Use the SDK's common fallback locale. Some plugin setup servers hang on
+    // unsupported locale files (notably Essentials for Spotify with "cs").
     json!({
-        "application": { "font": "Segoe UI", "language": "cs", "platform": "windows", "platformVersion": "10.0", "version": HOST_VERSION },
+        "application": { "font": "Segoe UI", "language": "en", "platform": "windows", "platformVersion": "10.0", "version": HOST_VERSION },
         "plugin": { "uuid": plugin_uuid, "version": plugin_version },
         "devicePixelRatio": 1,
         "colors": {
@@ -159,6 +161,18 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use serde_json::json;
+
+    #[test]
+    fn registration_uses_a_language_supported_by_plugin_setup_pages() {
+        // Essentials for Spotify 1.2.0.0 fetches /<language>.json before
+        // revealing its setup form. It ships en.json, but no cs.json; the
+        // missing-file response stalls, preventing its own fallback to English.
+        // Source: ntanis-dev/essentials-for-spotify/src/ui/setup/script.js.
+        assert_eq!(
+            info_json("D6-main", "test", "1.0")["application"]["language"],
+            "en"
+        );
+    }
 
     // Required wire fields match OpenAction's MIT-licensed inbound schemas:
     // https://github.com/OpenActionAPI/rust/blob/main/src/inbound/devices.rs
