@@ -40,6 +40,8 @@ pub struct State {
     pub calibrating: bool,
     /// AI usage per provider, for the editor's key previews
     pub usage: std::collections::BTreeMap<String, crate::usage::UsageView>,
+    /// latest GPU numbers (None until a GPU key was on screen), for the editor previews
+    pub gpu: Option<crate::gpu::GpuStats>,
 }
 
 /// Device id reported to plugins.

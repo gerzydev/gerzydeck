@@ -91,6 +91,9 @@ pub enum Action {
     /// Soundboard: `sound` is a stored sound id (empty for "stopAll"), `name` the original file name,
     /// `me`/`mic` volumes 0–100, `mode` "toggle" | "restart" | "stopAll" | "hold"
     Sound { sound: String, name: String, me: u8, mic: u8, mode: String },
+    /// GPU monitor (NVIDIA via NVML, FPS via RivaTuner): `metric` is one of `crate::gpu::METRICS`;
+    /// pressing the key cycles the shown metric for the session
+    Gpu { metric: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
