@@ -381,6 +381,10 @@ mod tests {
 
     #[test]
     fn gpu_metrics_normalize_and_round_trip() {
+        for metric in ["cpu", "cputemp", "ram"] {
+            assert!(crate::gpu::METRICS.contains(&metric));
+            assert_eq!(normalize_action(&serde_json::json!({ "type": "gpu", "metric": metric })), Action::Gpu { metric: metric.into() });
+        }
         for metric in crate::gpu::METRICS {
             let action = normalize_action(&serde_json::json!({ "type": "gpu", "metric": metric }));
             assert_eq!(action, Action::Gpu { metric: (*metric).into() });

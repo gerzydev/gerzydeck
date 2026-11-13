@@ -21,15 +21,20 @@ export function plural(n, one, many, csOne, csFew, csMany) {
 }
 
 const CS = {
-  "GPU monitor (NVIDIA)": "Monitor GPU (NVIDIA)",
+  "Monitor": "Monitor",
+  "CPU load": "CPU zátěž",
+  "CPU temperature": "Teplota CPU",
+  "Graphics (NVIDIA)": "Grafika (NVIDIA)",
+  "Processor and memory": "Procesor a paměť",
+  "Performance monitor (GPU, CPU, RAM)": "Monitor výkonu (GPU, CPU, RAM)",
   "GPU load": "Zátěž GPU",
   "GPU temperature": "Teplota GPU",
   "Power draw": "Spotřeba",
   "Core clock": "Takt jádra",
   "Fan speed": "Ventilátor",
-  "GPU: {0}": "GPU: {0}",
+  "Monitor: {0}": "Monitor: {0}",
   "Metric": "Metrika",
-  "FPS needs RivaTuner Statistics Server running; its overlay can stay off. Press the deck key to cycle through metrics.": "FPS vyžaduje běžící RivaTuner Statistics Server; overlay může být vypnutý. Stiskem klávesy na decku přepneš zobrazený údaj.",
+  "FPS needs RivaTuner Statistics Server; its overlay can stay off. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to cycle metrics within its group.": "FPS vyžaduje RivaTuner Statistics Server; overlay může být vypnutý. Teplota CPU potřebuje běžící MSI Afterburner se zapnutou teplotou CPU v Nastavení → Monitorování. Stiskem klávesy na decku přepneš údaj v rámci jeho skupiny.",
   "Unified plugin look": "Jednotný vzhled pluginů",
   "Original plugin look": "Původní vzhled pluginu",
   "Plugin keys get the app's style; they still change with the plugin's state.": "Klávesy pluginů mají vzhled aplikace a dál se mění podle stavu pluginu.",
