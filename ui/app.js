@@ -13,7 +13,7 @@ const TEXT_NOTE = t("Typing text works in regular apps, games may ignore it.");
 
 const ACTION_TYPES = [
   ['none', t("None")], ['keys', t("Key / shortcut")], ['macro', t("Macro")], ['launch', t("Launch program / website")],
-  ['media', t("Media and volume")], ['system', t("System")], ['profile', t("Switch profile")], ['usage', t("AI usage (Claude, GPT)")], ['plugin', 'Plugin…'],
+  ['sound', t("Sound (soundboard)")], ['media', t("Media and volume")], ['system', t("System")], ['profile', t("Switch profile")], ['usage', t("AI usage (Claude, GPT)")], ['plugin', 'Plugin…'],
 ];
 const MEDIA = [['playpause', t("Play / pause")], ['next', t("Next track")], ['prev', t("Previous track")], ['mute', t("Mute")], ['volup', t("Volume +")], ['voldown', t("Volume −")]];
 const SYSTEM = [['lock', t("Lock PC")], ['sleep', t("Sleep PC")]];
@@ -111,6 +111,7 @@ function actionSummary(a) {
     case 'keys': return a.codes.map(codeName).join(' + ');
     case 'macro': return t("Macro ({0} steps)", a.steps.length);
     case 'launch': return t("Launch {0}", a.target);
+    case 'sound': return a.mode === 'stopAll' ? t("Stop all sounds") : a.sound ? t("Sound: {0}", a.name || a.sound) : t("Sound (no file)");
     case 'media': return MEDIA.find(([v]) => v === a.command)?.[1] ?? t("Media");
     case 'system': return SYSTEM.find(([v]) => v === a.command)?.[1] ?? t("System");
     case 'plugin': return pluginAction(a.plugin, a.action).action?.name ?? 'Plugin';
@@ -146,9 +147,11 @@ function fillTile(btn, cfg, k) {
     return;
   }
   const pa = cfg.action?.type === 'plugin' && !cfg.image ? pluginAction(cfg.action.plugin, cfg.action.action) : null;
+  const soundIcon = cfg.action?.type === 'sound' && !cfg.image;
+  if (soundIcon) { const icon = svgIcon(ACTION_ICONS.sound); icon.classList.add('sound-icon'); btn.append(icon); }
   if (pa?.action?.icon) btn.append(h('img', { class: 'act-icon', src: pa.action.icon, alt: '' }));
   if (pa && !pa.plugin) btn.append(h('span', { class: 'lbl center' }, '⚠'));
-  if (cfg.label) btn.append(h('span', { class: `lbl ${cfg.image || pa?.action?.icon ? 'bottom' : 'center'}` }, cfg.label));
+  if (cfg.label) btn.append(h('span', { class: `lbl ${cfg.image || pa?.action?.icon || soundIcon ? 'bottom' : 'center'}` }, cfg.label));
   btn.append(h('span', { class: 'num' }, k));
 }
 
@@ -364,15 +367,16 @@ const ACTION_ICONS = {
   keys: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
   macro: '<path d="M4 6h10M4 12h10M4 18h6"/><path d="M16 14.5l5 3.5-5 3.5z"/>',
   launch: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  sound: '<path d="M11 4 6 8H3v8h3l5 4z"/><path d="M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/>',
   media: '<path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
   system: '<path d="M12 3v8"/><path d="M6.3 6.6a8 8 0 1 0 11.4 0"/>',
   profile: '<path d="M7 7h12l-3-3"/><path d="M17 17H5l3 3"/>',
   plugin: '<path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/>',
   usage: '<path d="M4 15a8 8 0 0 1 16 0"/><path d="M12 15l4-5"/><path d="M4 19h16"/>',
 };
-const ACTION_SHORT = { none: t("None"), keys: t("Key"), macro: t("Macro"), launch: t("Launch"), media: t("Media"), system: t("System"), profile: t("Profile"), usage: t("AI usage"), plugin: 'Plugin' };
+const ACTION_SHORT = { none: t("None"), keys: t("Key"), macro: t("Macro"), launch: t("Launch"), sound: t("Sound"), media: t("Media"), system: t("System"), profile: t("Profile"), usage: t("AI usage"), plugin: 'Plugin' };
 
-/** 4×2 grid of action types; the Plugin tile shows the chosen plugin action. */
+/** Grid of action types; the Plugin tile shows the chosen plugin action. */
 function actionGrid(cfg, onPick) {
   const current = cfg.action.type;
   const pa = current === 'plugin' ? pluginAction(cfg.action.plugin, cfg.action.action) : null;
@@ -396,6 +400,7 @@ function defaultAction(type) {
     case 'keys': return { type, codes: [] };
     case 'macro': return { type, steps: [{ type: 'tap', code: 'Digit1' }] };
     case 'launch': return { type, target: '', args: [] };
+    case 'sound': return { type, sound: '', name: '', me: 80, mic: 80, mode: 'toggle' };
     case 'media': return { type, command: 'playpause' };
     case 'system': return { type, command: 'lock' };
     case 'profile': return { type, profileId: '__back' };
@@ -424,6 +429,48 @@ function actionFields(cfg, changed, redraw, k) {
   switch (a.type) {
     case 'plugin':
       return pluginActionFields(ui, activeProfile().id, k, cfg, (rerender) => { save(); if (rerender) renderDeck(); else changed(); });
+    case 'sound': {
+      const mode = h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Playback mode")),
+        h('select', { class: 'rm-select', onchange: (e) => { a.mode = e.target.value; changed(); redraw(); } },
+          [['toggle', t("Play / stop")], ['restart', t("Restart from beginning")], ['stopAll', t("Stop all sounds")]].map(([v, l]) => option(v, l, a.mode))));
+      if (a.mode === 'stopAll') return [mode];
+      let busy = false;
+      const input = h('input', { type: 'file', accept: '.mp3,.wav,.ogg,.flac', hidden: true,
+        onchange: (e) => { const file = e.target.files[0]; if (file) importSound(file); e.target.value = ''; } });
+      const pick = h('button', { class: 'rm-btn is-sm', type: 'button', onclick: () => input.click() }, t("Choose sound…"));
+      const drop = h('div', { class: 'img-drop sound-drop',
+        ondragover: (e) => { e.preventDefault(); drop.classList.add('drag'); },
+        ondragleave: () => drop.classList.remove('drag'),
+        ondrop: (e) => { e.preventDefault(); drop.classList.remove('drag'); const file = e.dataTransfer.files[0]; if (file) importSound(file); } },
+        h('div', { class: 'rm-stack rm-grow', style: 'gap:6px;min-width:0' },
+          h('span', { class: 'sound-name', title: a.name || '' }, a.name || t("No sound selected")),
+          h('div', { class: 'rm-row' }, pick),
+          h('span', { class: 'rm-meta' }, t("MP3, WAV, OGG or FLAC · up to 50 MB. Drop a sound here."))), input);
+      async function importSound(file) {
+        if (busy) return;
+        busy = true; pick.disabled = true; pick.textContent = t("Importing…");
+        try {
+          const sound = await invoke('import_sound', new Uint8Array(await file.arrayBuffer()));
+          if (cfg.action !== a) return;
+          a.sound = sound; a.name = file.name; changed(); redraw();
+        } catch (e) { toast(e); }
+        finally { busy = false; pick.disabled = false; pick.textContent = t("Choose sound…"); }
+      }
+      const volume = (field, label) => {
+        const value = h('span', { class: 'rm-meta' }, (a[field] ?? 80) + ' %');
+        return h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, label),
+          h('div', { class: 'rm-row' }, h('input', { class: 'rm-grow', type: 'range', min: 0, max: 100, value: a[field] ?? 80,
+            oninput: (e) => { a[field] = +e.target.value; value.textContent = a[field] + ' %'; changed(); } }), value));
+      };
+      return [mode, drop,
+        h('div', { class: 'rm-row' },
+          h('button', { class: 'rm-btn is-sm', type: 'button', disabled: !a.sound, onclick: async () => {
+            try { await saveNow(); await invoke('preview_sound', { sound: a.sound, volume: a.me ?? 80 }); } catch (e) { toast(e); }
+          } }, t("▶ Test")),
+          h('button', { class: 'rm-btn is-sm is-ghost', type: 'button', onclick: () => invoke('stop_sounds').catch(toast) }, t("■ Stop"))),
+        volume('me', t("Volume for you")), volume('mic', t("Volume into microphone")),
+        h('div', { class: 'rm-meta' }, t("Microphone output needs a virtual microphone (Sonar / VB-Cable). Discord noise suppression (Krisp) may filter the sound."))];
+    }
     case 'keys': {
       const recBtn = h('button', { class: 'rm-btn is-sm', type: 'button' }, t("Record shortcut"));
       recBtn.onclick = () => {
@@ -626,9 +673,40 @@ function renderSettings() {
         h('button', { class: 'rm-btn is-sm', type: 'button', onclick: startCalibration }, t("Start calibration")))),
     h('div', {}, h('b', {}, 'Data'), h('code', {}, '%APPDATA%\\GerzysDeck')));
 
-  const parts = [h('div', { class: 'rm-panel' }, h('div', { class: 'rm-panel-body', style: 'padding-top:8px' }, rows)), bootLogoPanel()];
+  const parts = [h('div', { class: 'rm-panel' }, h('div', { class: 'rm-panel-body', style: 'padding-top:8px' }, rows)), soundboardPanel(), bootLogoPanel()];
   if (calibration) parts.push(calibrationPanel());
   $('page-settings').replaceChildren(h('div', { class: 'rm-stack' }, parts));
+}
+
+// Audio devices load when Settings opens; saved disconnected outputs stay selectable.
+let soundOutputs = null;
+let soundAutoMic = null;
+let soundOutputsLoading = false;
+function soundboardPanel() {
+  const deviceSelect = (field, label, fallback, initial) => {
+    const selected = config[field] ?? initial;
+    const devices = soundOutputs ?? [];
+    return h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, label),
+      h('select', { class: 'rm-select', onchange: (e) => { config[field] = e.target.value; save(); } },
+        fallback.map(([v, l]) => option(v, l, selected)),
+        devices.filter((d) => !fallback.some(([v]) => v === d)).map((d) => option(d, d, selected)),
+        !fallback.some(([v]) => v === selected) && !devices.includes(selected) && option(selected, soundOutputs === null ? selected : t("{0} (not connected)", selected), selected)));
+  };
+  if (soundOutputs === null && !soundOutputsLoading) {
+    soundOutputsLoading = true;
+    Promise.allSettled([invoke('list_audio_outputs'), invoke('auto_mic_device')]).then(([outputs, mic]) => {
+      soundOutputs = outputs.status === 'fulfilled' ? [...new Set(outputs.value)] : [];
+      soundAutoMic = mic.status === 'fulfilled' ? mic.value : null;
+      soundOutputsLoading = false;
+      if (outputs.status === 'rejected') toast(outputs.reason);
+      if (mic.status === 'rejected') toast(mic.reason);
+      if (page === 'settings') renderSettings();
+    });
+  }
+  return h('div', { class: 'rm-panel' }, h('div', { class: 'rm-panel-head' }, h('h2', {}, t("Soundboard"))),
+    h('div', { class: 'rm-panel-body rm-stack' },
+      deviceSelect('soundMeDevice', t("Output for you"), [['', t("Windows default")]], ''),
+      deviceSelect('soundMicDevice', t("Output into microphone"), [['auto', t("Auto ({0})", soundOutputsLoading ? t("Loading…") : soundAutoMic || t("not found"))], ['none', t("Off")]], 'auto')));
 }
 
 // ---------- boot logo ----------
