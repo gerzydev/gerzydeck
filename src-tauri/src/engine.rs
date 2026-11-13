@@ -208,7 +208,7 @@ struct Engine {
     /// last GPU samples, newest last, for the graphs on GPU keys
     gpu_history: std::collections::VecDeque<crate::gpu::GpuStats>,
     /// metric a GPU key shows after presses (context → metric); not saved
-    gpu_metrics: HashMap<String, &'static str>,
+    gpu_metrics: HashMap<String, String>,
 }
 
 impl Engine {
@@ -445,8 +445,9 @@ impl Engine {
                 .filter(|(_, until)| *until > now)
                 .map(|(o, _)| o)
                 .unwrap_or_default();
-            if let Action::Gpu { metric } = &cfg.action {
-                let shown = self.gpu_metrics.get(&context).copied().unwrap_or(metric.as_str());
+            if let Action::Gpu { metric, extra } = &cfg.action {
+                // a slot chosen by presses, as long as the key still has it
+                let shown = self.gpu_metrics.get(&context).map(String::as_str).filter(|m| m == metric || extra.iter().any(|e| e == m)).unwrap_or(metric.as_str());
                 let tile = crate::gpu::tile(shown, &cfg.label, &self.gpu_history);
                 let sig = format!("G|{tile:?}");
                 if self.rendered.get(&k) != Some(&sig) {
@@ -717,11 +718,14 @@ impl Engine {
                     let _ = w.send(());
                 }
             }
-            if let Action::Gpu { metric } = &action {
+            if let Action::Gpu { metric, extra } = &action {
                 let context = context_for(&self.active().id, key);
-                let current = self.gpu_metrics.get(&context).copied().unwrap_or(metric.as_str());
-                self.gpu_metrics.insert(context, crate::gpu::next_metric(current));
-                self.render_active();
+                let slots: Vec<&str> = std::iter::once(metric.as_str()).chain(extra.iter().map(String::as_str)).collect();
+                let current = self.gpu_metrics.get(&context).cloned().unwrap_or_else(|| metric.clone());
+                if let Some(next) = crate::gpu::next_slot(&slots, &current) {
+                    self.gpu_metrics.insert(context, next.to_string());
+                    self.render_active();
+                }
                 return;
             }
             if matches!(action, Action::Sound { .. }) {
@@ -1580,7 +1584,7 @@ mod sound_tests {
     fn gpu_key_redraws_on_samples_and_cycles_metrics_on_press() {
         let mut r = Rig::new();
         r.e.render_gpu = |t| format!("{}={}", t.caption, t.value.clone().unwrap_or_default()).into_bytes();
-        r.set(1, Action::Gpu { metric: "temp".into() });
+        r.set(1, Action::Gpu { metric: "temp".into(), extra: vec!["vram".into(), "cpu".into()] });
         r.e.handle(Msg::Device(DeviceEvent::Connected));
         r.images();
         let sample = crate::gpu::GpuStats { temp: Some(61.0), load: Some(40.0), ..Default::default() };
@@ -1591,10 +1595,21 @@ mod sound_tests {
         // every sample moves the graph, so the key is redrawn each time
         r.e.handle(Msg::Gpu(sample.clone()));
         assert_eq!(r.images().len(), 1);
-        // press: temp → vram (no VRAM numbers yet → dash), press again → power
-        r.e.on_key(1, true);
-        r.e.on_key(1, false);
+        // presses cycle the slots: temp → vram (no VRAM numbers yet → dash) → cpu → temp
+        let press = |r: &mut Rig| { r.e.on_key(1, true); r.e.on_key(1, false); };
+        press(&mut r);
         assert_eq!(r.images(), vec![(1, b"VRAM=".to_vec())]);
-        assert_eq!(r.e.config.profiles[0].key(1).action, Action::Gpu { metric: "temp".into() }, "cycling is not saved");
+        press(&mut r);
+        assert_eq!(r.images(), vec![(1, b"CPU=".to_vec())]);
+        press(&mut r);
+        assert_eq!(r.images(), vec![(1, format!("{caption}=61").into_bytes())]);
+        assert_eq!(r.e.config.profiles[0].key(1).action, Action::Gpu { metric: "temp".into(), extra: vec!["vram".into(), "cpu".into()] }, "cycling is not saved");
+        // a single slot: pressing changes nothing
+        r.set(2, Action::Gpu { metric: "load".into(), extra: vec![] });
+        r.e.render_active();
+        r.images();
+        r.e.on_key(2, true);
+        r.e.on_key(2, false);
+        assert!(r.images().is_empty());
     }
 }

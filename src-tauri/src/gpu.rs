@@ -225,11 +225,13 @@ pub fn metric_value(stats: &GpuStats, metric: &str) -> Option<f32> {
     }
 }
 
-/// Metric shown after `current` when the key is pressed; the press stays inside its group.
-pub fn next_metric(current: &str) -> &'static str {
-    let group = [FRAME_METRICS, GPU_METRICS, CPU_METRICS].into_iter().find(|g| g.contains(&current)).unwrap_or(FRAME_METRICS);
-    let i = group.iter().position(|m| *m == current).map_or(0, |i| (i + 1) % group.len());
-    group[i]
+/// Slot shown after `current` when the key is pressed; None with a single slot (nothing to cycle).
+pub fn next_slot<'a>(slots: &[&'a str], current: &str) -> Option<&'a str> {
+    if slots.len() < 2 {
+        return None;
+    }
+    let i = slots.iter().position(|m| *m == current).map_or(0, |i| (i + 1) % slots.len());
+    Some(slots[i])
 }
 
 
@@ -327,14 +329,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn metrics_cycle_and_wrap() {
-        assert_eq!(next_metric("fps"), "frametime");
-        assert_eq!(next_metric("bound"), "fps");
-        assert_eq!(next_metric("load"), "temp");
-        assert_eq!(next_metric("fan"), "load");
-        assert_eq!(next_metric("bogus"), "fps");
-        assert_eq!(next_metric("cpu"), "cputemp");
-        assert_eq!(next_metric("ram"), "cpu");
+    fn slots_cycle_and_wrap() {
+        let slots = ["fps", "cputemp", "load"];
+        assert_eq!(next_slot(&slots, "fps"), Some("cputemp"));
+        assert_eq!(next_slot(&slots, "load"), Some("fps"));
+        assert_eq!(next_slot(&slots, "bogus"), Some("fps"), "a metric no longer in the slots restarts at slot 1");
+        assert_eq!(next_slot(&["fps"], "fps"), None);
     }
 
     #[test]
