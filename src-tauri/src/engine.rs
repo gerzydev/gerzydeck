@@ -1172,7 +1172,7 @@ mod tests {
         let rendered = look_images(&rx);
         assert_eq!(rendered[0]["image"][0], json!([144, 144]));
         assert_eq!(rendered[0]["image"][1], json!([200, 90, 30, 255]));
-        assert_eq!(rendered[0]["align"], "middle");
+        assert_eq!(rendered[0]["align"], "bottom");
         let mut raw = serde_json::to_value(&e.config).unwrap();
         raw["pluginLook"] = json!(false);
         e.set_config(&raw).unwrap(); e.after_config_change();
@@ -1203,7 +1203,7 @@ mod tests {
         let (mut e, rx) = look_engine();
         // Title-only plugins receive the frame and skin alignment fallback.
         e.state.connected = true; e.render_active();
-        assert_eq!(look_images(&rx)[0]["align"], "middle");
+        assert_eq!(look_images(&rx)[0]["align"], "bottom");
         e.last_frame.clear();
         e.on_plugin(PluginEvent::SetTitle { context: "A:3".into(), title: Some("42%".into()), state: None });
         let rendered = look_images(&rx);

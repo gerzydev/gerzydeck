@@ -1,8 +1,8 @@
-//! Built-in look for popular plugins, in the app's own style (dark key, coloured rounded frame,
-//! stroke glyph). Skins replace a plugin's *own image files* — manifest state images and the
+//! Built-in look for popular plugins, in the soundboard style (dark key, coloured badge with a
+//! gold rim, white glyph; the badge colour shows the state). Skins replace a plugin's *own image files* — manifest state images and the
 //! files a plugin later picks with setImage — so keys still change with the plugin's state
 //! (a muted mic turns red, a running screen share green). Images a plugin draws itself
-//! (data URLs) are not skinned here; the engine gives those the generic frame instead.
+//! (data URLs) are not skinned here; the engine gives those the generic badge instead.
 //!
 //! Pure data: SVG strings, rasterised by `plugins::image::decode_plugin_image`.
 
@@ -20,51 +20,83 @@ fn base(image: &str) -> String {
     s.strip_suffix("@2x").unwrap_or(&s).to_string()
 }
 
-/// Key frame. `inner` is drawn on top; `color` tints the frame and its glow.
-pub fn frame_with(color: &str, inner: &str) -> String {
-    frame_layers(color, "", inner)
+/// Badge colours (gradient top, gradient bottom, rim) for a state colour.
+fn badge_colors(state: &str) -> (&'static str, &'static str, &'static str) {
+    match state {
+        RED => ("#8a2020", "#430b0b", "#d0504a"),
+        GREEN => ("#1f6b3a", "#0c3119", "#4cc97a"),
+        GREY => ("#3b3e43", "#1d1f22", "#6b7078"),
+        _ => ("#8f5a19", "#4a2a08", "#d9a040"),
+    }
 }
 
-/// Key frame with a background layer (`under`, clipped to the key face) below the frame lines.
-fn frame_layers(color: &str, under: &str, inner: &str) -> String {
+/// Badge geometry: key badge in the upper part (the bottom stays free for plugin titles and
+/// labels), or one big centred badge for the editor lists.
+#[derive(Clone, Copy, PartialEq)]
+enum Size {
+    Key,
+    List,
+}
+
+/// Dark key with a coloured badge (gold rim) and a white glyph — the soundboard look.
+/// `under` is drawn on the key below the badge (Discord logo), `over` on top (captions, marks).
+fn badge_tile(state: &str, g: &str, size: Size, under: &str, over: &str) -> String {
+    let (top, bottom, rim) = badge_colors(state);
+    let (x, y, w, r, gx, gy, gs) = match size {
+        Size::Key => (38.0, 22.0, 68.0, 11.0, 48.0, 32.0, 2.0),
+        Size::List => (18.0, 18.0, 108.0, 16.0, 36.0, 36.0, 3.0),
+    };
+    let glyph = |color: &str, width: f32, dy: f32| {
+        format!(r#"<g transform="translate({gx} {}) scale({gs})" fill="none" stroke="{color}" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round">{g}</g>"#, gy + dy)
+    };
     format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
 <defs>
-<linearGradient id="k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22262a"/><stop offset="1" stop-color="#101214"/></linearGradient>
-<radialGradient id="l" cx="0.5" cy="0" r="0.8"><stop offset="0" stop-color="{color}" stop-opacity="0.22"/><stop offset="1" stop-color="{color}" stop-opacity="0"/></radialGradient>
-<filter id="g" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3"/></filter>
-<clipPath id="c"><rect x="8" y="8" width="128" height="128" rx="19"/></clipPath>
+<linearGradient id="k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b1d21"/><stop offset="1" stop-color="#0b0c0e"/></linearGradient>
+<linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/></linearGradient>
+<radialGradient id="h" cx="0.5" cy="0.38" r="0.55"><stop offset="0" stop-color="{rim}" stop-opacity="0.16"/><stop offset="1" stop-color="{rim}" stop-opacity="0"/></radialGradient>
+<filter id="s" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4"/></filter>
+<filter id="t" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="1.2"/></filter>
 </defs>
 <rect width="144" height="144" fill="url(#k)"/>
-<rect width="144" height="144" fill="url(#l)"/>
-<g clip-path="url(#c)">{under}</g>
-<rect x="7" y="7" width="130" height="130" rx="20" fill="none" stroke="{color}" stroke-opacity="0.45" stroke-width="5" filter="url(#g)"/>
-<rect x="7" y="7" width="130" height="130" rx="20" fill="none" stroke="{color}" stroke-width="2.5"/>
-<rect x="8.5" y="8.5" width="127" height="127" rx="18.5" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="1"/>
-{inner}
+<rect width="144" height="144" fill="url(#h)"/>
+{under}
+<rect x="{x}" y="{}" width="{w}" height="{w}" rx="{r}" fill="#000" opacity="0.55" filter="url(#s)"/>
+<rect x="{x}" y="{y}" width="{w}" height="{w}" rx="{r}" fill="url(#b)"/>
+<rect x="{x}" y="{y}" width="{w}" height="{w}" rx="{r}" fill="none" stroke="{rim}" stroke-width="2.5"/>
+<path d="M{} {}h{}" stroke="#fff" stroke-opacity="0.22" stroke-width="1.5" stroke-linecap="round"/>
+<g filter="url(#t)" opacity="0.45">{}</g>
+{}
+{over}
+</svg>"##,
+        y + 4.0,
+        x + 6.0,
+        y + 3.5,
+        w - 12.0,
+        glyph("#000", 2.4, 1.0),
+        glyph("#ffffff", 2.0, 0.0),
+    )
+}
+
+/// Base of the generic look for images plugins draw themselves: dark key and a big amber badge;
+/// the plugin's picture covers the badge's face and keeps the gold rim around it.
+pub fn frame_svg() -> String {
+    let (top, bottom, rim) = badge_colors(ACCENT);
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+<defs>
+<linearGradient id="k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b1d21"/><stop offset="1" stop-color="#0b0c0e"/></linearGradient>
+<linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/></linearGradient>
+</defs>
+<rect width="144" height="144" fill="url(#k)"/>
+<rect x="18" y="18" width="108" height="108" rx="15" fill="url(#b)"/>
+<rect x="18" y="18" width="108" height="108" rx="15" fill="none" stroke="{rim}" stroke-width="2.5"/>
 </svg>"##
     )
 }
 
-/// The empty accent frame: base for the generic look of images plugins draw themselves.
-pub fn frame_svg() -> String {
-    frame_with(ACCENT, "")
-}
-
-fn glyph(g: &str, color: &str, x: f32, y: f32, scale: f32) -> String {
-    format!(r#"<g transform="translate({x} {y}) scale({scale})" fill="none" stroke="{color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{g}</g>"#)
-}
-
-fn caption(text: &str, y: f32) -> String {
-    format!(r##"<text x="72" y="{y}" text-anchor="middle" font-family="Segoe UI, DM Sans, sans-serif" font-size="14" font-weight="700" letter-spacing="2" fill="#8a9098">{text}</text>"##)
-}
-
-/// Big centred glyph, optional small caption under it (the layer drawn inside the frame).
-fn centred_inner(g: &str, color: &str, cap: Option<&str>) -> String {
-    match cap {
-        None => glyph(g, color, 42.0, 42.0, 2.5),
-        Some(c) => format!("{}{}", glyph(g, color, 45.0, 30.0, 2.25), caption(c, 118.0)),
-    }
+fn caption(text: &str) -> String {
+    format!(r##"<text x="72" y="118" text-anchor="middle" font-family="Segoe UI, DM Sans, sans-serif" font-size="14" font-weight="700" letter-spacing="2" fill="#9aa0a8">{text}</text>"##)
 }
 
 // ---------- glyphs (24×24, stroke) ----------
@@ -99,19 +131,15 @@ fn with_slash(g: &str) -> String {
 // Every action uses the same placeholder "icon" file, so these go by action, not by file.
 
 fn system_tile(action: &str, list: bool) -> Option<String> {
-    let (g, name) = match action {
-        "me.amankhanna.oasystem.cpu" => (CPU, "CPU"),
-        "me.amankhanna.oasystem.ram" => (RAM, "RAM"),
-        "me.amankhanna.oasystem.uptime" => (CLOCK, "UPTIME"),
-        "me.amankhanna.oasystem.os" => (MONITOR, "OS"),
+    let g = match action {
+        "me.amankhanna.oasystem.cpu" => CPU,
+        "me.amankhanna.oasystem.ram" => RAM,
+        "me.amankhanna.oasystem.uptime" => CLOCK,
+        "me.amankhanna.oasystem.os" => MONITOR,
         _ => return None,
     };
-    Some(if list {
-        frame_with(ACCENT, &glyph(g, ACCENT, 36.0, 36.0, 3.0))
-    } else {
-        // glyph on top, the live value in the middle (title_align), caption at the bottom
-        frame_with(ACCENT, &format!("{}{}", glyph(g, ACCENT, 57.0, 17.0, 1.25), caption(name, 121.0)))
-    })
+    // the live value goes under the badge (title_align "bottom")
+    Some(badge_tile(ACCENT, g, if list { Size::List } else { Size::Key }, "", ""))
 }
 
 // ---------- Discord (me.amankhanna.oadiscord) ----------
@@ -122,10 +150,10 @@ fn system_tile(action: &str, list: bool) -> Option<String> {
 /// large and faint in the lower left of the key face, tinted with the state colour.
 fn discord_logo(color: &str) -> String {
     const CLYDE: &str = "M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z";
-    format!(r#"<path transform="translate(-16 50) scale(4.4)" d="{CLYDE}" fill="{color}" fill-opacity="0.13"/>"#)
+    format!(r#"<path transform="translate(-16 50) scale(4.4)" d="{CLYDE}" fill="{color}" fill-opacity="0.14"/>"#)
 }
 
-fn discord_file(file: &str) -> Option<String> {
+fn discord_file(file: &str, size: Size) -> Option<String> {
     let name = file.strip_prefix("actions/")?;
     let mic_off = with_slash(MIC);
     let headphones_off = with_slash(HEADPHONES);
@@ -161,7 +189,12 @@ fn discord_file(file: &str) -> Option<String> {
         "serverStats" => (CHART, ACCENT, None),
         _ => return None,
     };
-    Some(frame_layers(color, &discord_logo(color), &centred_inner(g, color, cap)))
+    let rim = badge_colors(color).2;
+    // lists show just the badge; the key adds the faint logo and the caption
+    if size == Size::List {
+        return Some(badge_tile(color, g, size, "", ""));
+    }
+    Some(badge_tile(color, g, size, &discord_logo(rim), &cap.map(caption).unwrap_or_default()))
 }
 
 // ---------- Essentials for Spotify (com.ntanis.essentials-for-spotify) ----------
@@ -200,25 +233,24 @@ const WAVES: &str = r#"<path d="M14 9a4.5 4.5 0 0 1 0 6M17 6.5a8 8 0 0 1 0 11"/>
 const CROSS: &str = r#"<path d="M14.5 9.5l5 5M19.5 9.5l-5 5"/>"#;
 
 /// "?" badge for states the plugin doesn't know yet.
-const UNKNOWN_BADGE: &str = r##"<circle cx="112" cy="33" r="13" fill="#6b7078"/><text x="112" y="39" text-anchor="middle" font-family="Segoe UI, DM Sans, sans-serif" font-size="17" font-weight="700" fill="#101214">?</text>"##;
+const UNKNOWN_BADGE: &str = r##"<circle cx="104" cy="24" r="11" fill="#6b7078" stroke="#0b0c0e" stroke-width="2"/><text x="104" y="30" text-anchor="middle" font-family="Segoe UI, DM Sans, sans-serif" font-size="15" font-weight="700" fill="#101214">?</text>"##;
 
 /// Speaker with a level bar under it (volume-stack-<n>[-muted]).
-fn volume_level(level: u32, muted: bool) -> String {
-    let color = if muted { RED } else { ACCENT };
+fn volume_level(level: u32, muted: bool, size: Size) -> String {
+    let state = if muted { RED } else { ACCENT };
+    let rim = badge_colors(state).2;
     let g = format!("{SPEAKER_BODY}{}", if muted { CROSS } else { WAVES });
-    let width = 80.0 * level.min(100) as f32 / 100.0;
-    frame_with(color, &format!(
-        r##"{}<rect x="32" y="106" width="80" height="9" rx="4.5" fill="#ffffff" fill-opacity="0.08"/><rect x="32" y="106" width="{width}" height="9" rx="4.5" fill="{color}"/>"##,
-        glyph(&g, color, 45.0, 22.0, 2.25)
-    ))
+    let width = 68.0 * level.min(100) as f32 / 100.0;
+    let bar = format!(r##"<rect x="38" y="101" width="68" height="8" rx="4" fill="#ffffff" fill-opacity="0.08"/><rect x="38" y="101" width="{width}" height="8" rx="4" fill="{rim}"/>"##);
+    badge_tile(state, &g, size, "", if size == Size::Key { &bar } else { "" })
 }
 
-fn spotify_file(file: &str) -> Option<String> {
+fn spotify_file(file: &str, size: Size) -> Option<String> {
     let name = file.strip_prefix("images/states/")?;
     if let Some(rest) = name.strip_prefix("volume-stack-") {
         let (n, muted) = rest.strip_suffix("-muted").map_or((rest, false), |n| (n, true));
         if let Ok(level) = n.parse::<u32>() {
-            return Some(volume_level(level, muted));
+            return Some(volume_level(level, muted, size));
         }
     }
     let (name, unknown) = name.strip_suffix("-unknown").map_or((name, false), |n| (n, true));
@@ -274,15 +306,10 @@ fn spotify_file(file: &str) -> Option<String> {
         "local" => (FOLDER, ACCENT, false),
         _ => return None,
     };
-    let color = if unknown { GREY } else { color };
-    let mut inner = glyph(g, color, 42.0, 42.0, 2.5);
-    if filled {
-        inner = inner.replacen(r#"fill="none""#, &format!(r#"fill="{color}" fill-opacity="0.35""#), 1);
-    }
-    if unknown {
-        inner.push_str(UNKNOWN_BADGE);
-    }
-    Some(frame_with(color, &inner))
+    let state = if unknown { GREY } else { color };
+    // a filled shape (liked heart) keeps the white outline over a translucent white fill
+    let g = if filled { g.replace("<path ", r##"<path fill="#ffffff" fill-opacity="0.35" "##) } else { g.to_string() };
+    Some(badge_tile(state, &g, size, "", if unknown { UNKNOWN_BADGE } else { "" }))
 }
 
 // ---------- public API ----------
@@ -295,10 +322,11 @@ pub fn skin_svg(plugin: &str, action: &str, image: &str, list: bool) -> Option<S
     if image.starts_with("data:") {
         return None;
     }
+    let size = if list { Size::List } else { Size::Key };
     match plugin {
         "me.amankhanna.oasystem" => system_tile(action, list),
-        "me.amankhanna.oadiscord" => discord_file(&base(image)),
-        "com.ntanis.essentials-for-spotify" => spotify_file(&base(image)),
+        "me.amankhanna.oadiscord" => discord_file(&base(image), size),
+        "com.ntanis.essentials-for-spotify" => spotify_file(&base(image), size),
         _ => None,
     }
 }
@@ -306,20 +334,21 @@ pub fn skin_svg(plugin: &str, action: &str, image: &str, list: bool) -> Option<S
 /// Category / plugin icon in the editor.
 pub fn plugin_icon_svg(plugin: &str) -> Option<String> {
     if plugin == "me.amankhanna.oadiscord" {
-        let logo = discord_logo(ACCENT).replace(r#"transform="translate(-16 50) scale(4.4)""#, r#"transform="translate(34 36) scale(3.15)""#).replace(r#"fill-opacity="0.13""#, r#"fill-opacity="0.9""#);
-        return Some(frame_with(ACCENT, &logo));
+        // the white logo on the badge, no stroke glyph
+        let logo = discord_logo("#ffffff").replace(r#"transform="translate(-16 50) scale(4.4)""#, r#"transform="translate(36 39) scale(3)""#).replace(r#"fill-opacity="0.14""#, r#"fill-opacity="1""#);
+        return Some(badge_tile(ACCENT, "", Size::List, "", &logo));
     }
     let g = match plugin {
         "me.amankhanna.oasystem" => PULSE,
         "com.ntanis.essentials-for-spotify" => MUSIC_BOX,
         _ => return None,
     };
-    Some(frame_with(ACCENT, &glyph(g, ACCENT, 36.0, 36.0, 3.0)))
+    Some(badge_tile(ACCENT, g, Size::List, "", ""))
 }
 
-/// Where the live title goes on a skinned key when the manifest doesn't say.
+/// Where the live title goes on a skinned key when the manifest doesn't say (under the badge).
 pub fn title_align(action: &str) -> Option<&'static str> {
-    action.starts_with("me.amankhanna.oasystem.").then_some("middle")
+    action.starts_with("me.amankhanna.oasystem.").then_some("bottom")
 }
 
 pub fn data_url(svg: &str) -> String {
@@ -354,7 +383,7 @@ mod tests {
 
     #[test]
     fn state_colours_follow_meaning() {
-        let edge = |f: &str| *render(&skin_svg("me.amankhanna.oadiscord", "x", &format!("actions/{f}"), false).unwrap()).get_pixel(72, 7);
+        let edge = |f: &str| *render(&skin_svg("me.amankhanna.oadiscord", "x", &format!("actions/{f}"), false).unwrap()).get_pixel(72, 22); // badge rim
         let (idle, muted, live, off) = (edge("mute_0"), edge("mute_1"), edge("video_1"), edge("video_0_off"));
         assert!(idle[0] > 200 && idle[1] > 120 && idle[2] < 110, "accent {idle:?}");
         assert!(muted[0] > 200 && muted[1] < 140, "red {muted:?}");
@@ -379,7 +408,7 @@ mod tests {
             for list in [false, true] {
                 render(&skin_svg("me.amankhanna.oasystem", &uuid, "icon", list).unwrap());
             }
-            assert_eq!(title_align(&uuid), Some("middle"));
+            assert_eq!(title_align(&uuid), Some("bottom"));
         }
         assert!(skin_svg("me.amankhanna.oasystem", "me.amankhanna.oasystem.gpu", "icon", false).is_none());
     }
@@ -396,8 +425,8 @@ mod tests {
         for f in ["long", "mode-stack-1-0-1", "volume-stack-abc"] {
             assert!(skin_svg("com.ntanis.essentials-for-spotify", "x", &format!("images/states/{f}"), false).is_none(), "{f}");
         }
-        let bar = |svg: String| render(&svg).get_pixel(36, 110)[0];
-        assert!(bar(volume_level(100, false)) > 200 && bar(volume_level(0, false)) < 80, "level bar follows the volume");
+        let bar = |svg: String| render(&svg).get_pixel(42, 105)[0];
+        assert!(bar(volume_level(100, false, Size::Key)) > 180 && bar(volume_level(0, false, Size::Key)) < 80, "level bar follows the volume");
     }
 
     #[test]
@@ -407,7 +436,7 @@ mod tests {
         assert!(plugin_icon_svg("com.elgato.obsstudio").is_none());
         assert!(title_align("me.amankhanna.oadiscord.togglemute").is_none());
         let f = render(&frame_svg());
-        assert!(f.get_pixel(72, 7)[0] > 200);
+        assert!(f.get_pixel(72, 18)[0] > 180, "gold rim of the generic badge");
     }
 }
 

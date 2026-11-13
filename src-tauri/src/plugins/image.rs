@@ -188,7 +188,8 @@ fn monochrome_glyph(img: &RgbaImage) -> bool {
     bright > 0 && bright * 100 <= area * 65 && neutral * 100 >= bright * 96 && light * 100 >= bright * 75
 }
 
-/// Frame any plugin image, tinting simple light glyphs while preserving coloured artwork.
+/// Put any plugin image on the generic badge: simple light glyphs become clean white (like the
+/// skins' glyphs), coloured artwork keeps its colours.
 pub fn theme_image(img: &RgbaImage) -> RgbaImage {
     let mut frame = (*theme_frame()).clone();
     if img.width() == 0 || img.height() == 0 { return frame; }
@@ -201,12 +202,12 @@ pub fn theme_image(img: &RgbaImage) -> RgbaImage {
         for p in source.pixels_mut() {
             let level = (p[0] as u32 + p[1] as u32 + p[2] as u32) / 3;
             if transparent {
-                p[0] = (255 * level / 255) as u8;
-                p[1] = (154 * level / 255) as u8;
-                p[2] = (60 * level / 255) as u8;
+                p[0] = level as u8;
+                p[1] = level as u8;
+                p[2] = level as u8;
             } else {
                 p[3] = (p[3] as u32 * level.saturating_sub(32) / 223) as u8;
-                p[0] = 255; p[1] = 154; p[2] = 60;
+                p[0] = 255; p[1] = 255; p[2] = 255;
             }
         }
     }
@@ -579,11 +580,11 @@ mod theme_tests {
         img
     }
     #[test]
-    fn white_transparent_and_dark_background_glyphs_turn_orange() {
+    fn white_transparent_and_dark_background_glyphs_stay_clean_white() {
         for bg in [Rgba([0, 0, 0, 0]), Rgba([15, 15, 15, 255])] {
             let img = glyph(bg);
             assert!(monochrome_glyph(&img));
-            assert_eq!(theme_image(&img).get_pixel(72, 72).0, [255, 154, 60, 255]);
+            assert_eq!(theme_image(&img).get_pixel(72, 72).0, [255, 255, 255, 255]);
         }
     }
     #[test]
@@ -604,7 +605,7 @@ mod theme_tests {
         assert_eq!(themed.dimensions(), (144, 144));
         assert_eq!(themed.get_pixel(72, 72), img.get_pixel(52, 52));
         assert_eq!(themed.get_pixel(45, 61), img.get_pixel(25, 41));
-        assert!(themed.get_pixel(7, 72)[0] > themed.get_pixel(7, 72)[2]);
+        assert!(themed.get_pixel(18, 72)[0] > themed.get_pixel(18, 72)[2], "gold rim around the picture");
         assert_ne!(themed.get_pixel(20, 20), img.get_pixel(0, 0), "inner corners are clipped");
     }
     #[test]
