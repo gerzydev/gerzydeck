@@ -272,3 +272,5 @@ code { font-family: var(--font-mono); color: var(--accent); font-size: 0.92em; u
 .gpu-unit { font-size: 10px; color: #a8adb2; }
 .gpu-app { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gpu-prev .u-msg { max-width: 100%; overflow-wrap: anywhere; }
+
+.fps-permission { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }

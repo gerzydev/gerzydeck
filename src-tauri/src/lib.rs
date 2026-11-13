@@ -22,3 +22,4 @@ pub mod gpu;
 pub mod rtss;
 pub mod afterburner;
 pub mod presentmon;
+pub mod fps_permission;
