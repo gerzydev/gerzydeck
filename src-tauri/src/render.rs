@@ -99,17 +99,61 @@ pub fn draw_key_label(canvas: &mut RgbImage, label: &str) {
     draw_label(canvas, label, true);
 }
 
+/// Word-wraps `text` into at most `max_lines` lines no wider than `width` px. Words too long
+/// for a line are split by characters; text that still doesn't fit ends with "…".
+fn wrap_label(text: &str, font: &FontVec, scale: PxScale, width: u32, max_lines: usize) -> Vec<String> {
+    let fits = |s: &str| text_size(scale, font, s).0 <= width;
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let joined = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+        if fits(&joined) {
+            line = joined;
+            continue;
+        }
+        if !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+        }
+        for ch in word.chars() {
+            let next = format!("{line}{ch}");
+            if fits(&next) || line.is_empty() {
+                line = next;
+            } else {
+                lines.push(std::mem::replace(&mut line, ch.to_string()));
+            }
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        let last = lines.last_mut().expect("max_lines > 0");
+        while !last.is_empty() && !fits(&format!("{}…", last.trim_end())) {
+            last.pop();
+        }
+        *last = format!("{}…", last.trim_end());
+    }
+    lines
+}
+
 fn draw_label(canvas: &mut RgbImage, label: &str, with_image: bool) {
     let Some(font) = font() else {
         log::warn!("no system font found, skipping key label");
         return;
     };
-    let text = shorten(label);
-    let scale = PxScale::from(if with_image { 15.0 } else { 19.0 });
-    let (w, h) = text_size(scale, font, &text);
+    // without a picture the label owns the key (up to 3 lines); over a picture it stays at the bottom (2)
+    let (scale, max_lines) = if with_image { (PxScale::from(15.0), 2) } else { (PxScale::from(19.0), 3) };
+    let lines = wrap_label(label, font, scale, KEY_SIZE - 10, max_lines);
+    if lines.is_empty() {
+        return;
+    }
+    let line_h = scale.y.ceil() as i32 + 1;
+    let block = line_h * lines.len() as i32;
+    let top = if with_image { KEY_SIZE as i32 - 6 - block } else { (KEY_SIZE as i32 - block) / 2 };
     if with_image {
         // dark gradient strip so the label stays readable on any picture
-        let strip = KEY_SIZE * 62 / 100;
+        let strip = (top - 12).clamp(0, KEY_SIZE as i32 * 62 / 100) as u32;
         for y in strip..KEY_SIZE {
             let a = (y - strip) as f32 / (KEY_SIZE - strip) as f32 * 0.75;
             for x in 0..KEY_SIZE {
@@ -120,9 +164,11 @@ fn draw_label(canvas: &mut RgbImage, label: &str, with_image: bool) {
             }
         }
     }
-    let x = (KEY_SIZE as i32 - w as i32) / 2;
-    let y = if with_image { KEY_SIZE as i32 - 6 - h as i32 } else { (KEY_SIZE as i32 - h as i32) / 2 };
-    draw_text_mut(canvas, LABEL_COLOR, x.max(1), y, scale, font, &text);
+    for (i, text) in lines.iter().enumerate() {
+        let (w, _) = text_size(scale, font, text);
+        let x = (KEY_SIZE as i32 - w as i32) / 2;
+        draw_text_mut(canvas, LABEL_COLOR, x.max(1), top + i as i32 * line_h, scale, font, text);
+    }
 }
 
 /// Matches the editor preview (12 px on a 92 px tile).
@@ -392,6 +438,25 @@ mod tests {
         assert!(p[0] > 200 && p[1] > 100 && p[1] < 200 && p[2] < 110, "{p:?}");
         let center = tile.get_pixel(KEY_SIZE / 2, KEY_SIZE / 2);
         assert!(center[0] < 50);
+    }
+
+    #[test]
+    fn labels_wrap_to_three_lines_and_end_with_an_ellipsis() {
+        let Some(font) = font() else { return };
+        let s = PxScale::from(19.0);
+        let fits = |l: &String| text_size(s, font, l).0 <= KEY_SIZE - 10;
+        assert_eq!(wrap_label("Fireball", font, s, KEY_SIZE - 10, 3), vec!["Fireball"]);
+        let words = wrap_label("Ohnivá koule na nepřítele", font, s, KEY_SIZE - 10, 3);
+        assert!(words.len() > 1 && words.iter().all(fits), "{words:?}");
+        assert_eq!(words.join(" "), "Ohnivá koule na nepřítele", "breaks between words when it can");
+        let long = wrap_label("dfdsfsdfdfsdfsdfdsfdsfsdfsdf", font, s, KEY_SIZE - 10, 3);
+        assert!(long.len() >= 2 && long.len() <= 3 && long.iter().all(fits), "{long:?}");
+        let huge = wrap_label(&"W".repeat(40), font, s, KEY_SIZE - 10, 3);
+        assert_eq!(huge.len(), 3);
+        assert!(huge[2].ends_with('…') && huge.iter().all(fits), "{huge:?}");
+        assert!(wrap_label("   ", font, s, KEY_SIZE - 10, 3).is_empty());
+        render_key_jpeg(&KeySpec { label: "x".repeat(40), ..KeySpec::default() });
+        render_key_jpeg(&KeySpec { label: "a b c d e f g h i j k l m n".into(), image: Some(png_of(&image::DynamicImage::new_rgb8(10, 10))), ..KeySpec::default() });
     }
 
     #[test]
