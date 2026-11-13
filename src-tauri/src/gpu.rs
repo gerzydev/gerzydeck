@@ -51,6 +51,7 @@ pub fn spawn_poller(publish: impl Fn(GpuStats) + Send + 'static) -> std::thread:
             let mut nvml: Option<nvml_wrapper::Nvml> = None;
             let mut nvml_error: Option<String> = None;
             let mut last_try: Option<std::time::Instant> = None;
+            let mut cpu = CpuMeter::default();
             loop {
                 std::thread::sleep(POLL);
                 if !WANTED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -76,6 +77,12 @@ pub fn spawn_poller(publish: impl Fn(GpuStats) + Send + 'static) -> std::thread:
                 if let Some(f) = crate::rtss::read_fps(foreground_pid()) {
                     stats.fps = Some(f.fps);
                     stats.fps_app = Some(f.app);
+                }
+                stats.cpu = cpu.sample();
+                stats.cpu_temp = crate::afterburner::read_cpu_temp();
+                if let Some((used, total)) = memory() {
+                    stats.ram_used = Some(used);
+                    stats.ram_total = Some(total);
                 }
                 publish(stats);
             }
@@ -108,6 +115,44 @@ fn sample(nvml: &nvml_wrapper::Nvml) -> GpuStats {
     }
 }
 
+/// Total CPU load from the system idle/kernel/user times between two calls.
+#[derive(Default)]
+struct CpuMeter {
+    last: Option<(u64, u64)>,
+}
+
+impl CpuMeter {
+    fn sample(&mut self) -> Option<f32> {
+        use windows::Win32::Foundation::FILETIME;
+        use windows::Win32::System::Threading::GetSystemTimes;
+        let (mut idle, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default());
+        // SAFETY: three valid out-pointers to FILETIME
+        unsafe { GetSystemTimes(Some(&mut idle), Some(&mut kernel), Some(&mut user)) }.ok()?;
+        let t = |f: FILETIME| (u64::from(f.dwHighDateTime) << 32) | u64::from(f.dwLowDateTime);
+        // kernel time includes idle time
+        let now = (t(idle), t(kernel) + t(user));
+        let prev = self.last.replace(now)?;
+        cpu_load(prev, now)
+    }
+}
+
+/// CPU load in % between two (idle, total) time pairs.
+fn cpu_load(prev: (u64, u64), now: (u64, u64)) -> Option<f32> {
+    let total = now.1.checked_sub(prev.1)?;
+    let idle = now.0.checked_sub(prev.0)?;
+    (total > 0).then(|| (100.0 * (1.0 - idle as f64 / total as f64)).clamp(0.0, 100.0) as f32)
+}
+
+/// Physical memory (used, total) in MiB.
+fn memory() -> Option<(f32, f32)> {
+    use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    let mut m = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
+    // SAFETY: dwLength is set as the API requires
+    unsafe { GlobalMemoryStatusEx(&mut m) }.ok()?;
+    const MIB: f32 = 1024.0 * 1024.0;
+    Some(((m.ullTotalPhys - m.ullAvailPhys) as f32 / MIB, m.ullTotalPhys as f32 / MIB))
+}
+
 /// Process id of the foreground window: RTSS may hook several programs, the one in front wins.
 fn foreground_pid() -> Option<u32> {
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
@@ -130,14 +175,18 @@ pub fn metric_value(stats: &GpuStats, metric: &str) -> Option<f32> {
         "power" => stats.power,
         "clock" => stats.clock,
         "fan" => stats.fan,
+        "cpu" => stats.cpu,
+        "cputemp" => stats.cpu_temp,
+        "ram" => stats.ram_used,
         _ => None,
     }
 }
 
-/// Metric shown after `current` when the key is pressed.
+/// Metric shown after `current` when the key is pressed; the press stays inside its group.
 pub fn next_metric(current: &str) -> &'static str {
-    let i = METRICS.iter().position(|m| *m == current).map_or(0, |i| (i + 1) % METRICS.len());
-    METRICS[i]
+    let group = if CPU_METRICS.contains(&current) { CPU_METRICS } else { GPU_METRICS };
+    let i = group.iter().position(|m| *m == current).map_or(0, |i| (i + 1) % group.len());
+    group[i]
 }
 
 
@@ -165,7 +214,10 @@ fn caption(metric: &str) -> String {
     match metric {
         "fps" => "FPS",
         "load" => tr("ZÁTĚŽ GPU", "GPU LOAD"),
-        "temp" => tr("TEPLOTA", "TEMP"),
+        "temp" => tr("TEPLOTA GPU", "GPU TEMP"),
+        "cpu" => "CPU",
+        "cputemp" => tr("TEPLOTA CPU", "CPU TEMP"),
+        "ram" => "RAM",
         "vram" => "VRAM",
         "power" => tr("SPOTŘEBA", "POWER"),
         "clock" => tr("TAKT", "CLOCK"),
@@ -180,34 +232,37 @@ pub fn tile(metric: &str, label: &str, history: &std::collections::VecDeque<GpuS
     let latest = history.back();
     let caption = if label.trim().is_empty() { caption(metric) } else { label.trim().to_string() };
     let value = latest.and_then(|s| metric_value(s, metric));
-    let total = latest.and_then(|s| s.vram_total);
+    let total = latest.and_then(|s| if metric == "ram" { s.ram_total } else { s.vram_total });
     let decimal = |v: f32| format!("{v:.1}").replace('.', crate::i18n::tr(",", "."));
     let (text, unit) = match (metric, value) {
         (_, None) => (None, ""),
-        ("vram", Some(v)) => (Some(decimal(v / 1024.0)), "GB"),
+        ("vram" | "ram", Some(v)) => (Some(decimal(v / 1024.0)), "GB"),
         ("fps", Some(v)) => (Some(format!("{}", v.round() as i64)), "FPS"),
-        ("temp", Some(v)) => (Some(format!("{}", v.round() as i64)), "°C"),
+        ("temp" | "cputemp", Some(v)) => (Some(format!("{}", v.round() as i64)), "°C"),
         ("power", Some(v)) => (Some(format!("{}", v.round() as i64)), "W"),
         ("clock", Some(v)) => (Some(format!("{}", v.round() as i64)), "MHz"),
         (_, Some(v)) => (Some(format!("{}", v.round() as i64)), "%"),
     };
     let warn = match (metric, value) {
         ("temp", Some(t)) => t >= 83.0,
-        ("vram", Some(v)) => total.is_some_and(|t| t > 0.0 && v / t >= 0.9),
+        ("cputemp", Some(t)) => t >= 90.0,
+        ("vram" | "ram", Some(v)) => total.is_some_and(|t| t > 0.0 && v / t >= 0.9),
         _ => false,
     };
     let series: Vec<f32> = history.iter().map(|s| metric_value(s, metric).unwrap_or(0.0)).collect();
     let peak = series.iter().copied().fold(0.0f32, f32::max);
     let (lo, hi) = match metric {
-        "load" | "fan" => (0.0, 100.0),
-        "temp" => (20.0, 100.0),
-        "vram" => (0.0, total.unwrap_or(peak).max(1.0)),
+        "load" | "fan" | "cpu" => (0.0, 100.0),
+        "temp" | "cputemp" => (20.0, 100.0),
+        "vram" | "ram" => (0.0, total.unwrap_or(peak).max(1.0)),
         "fps" => (0.0, (peak * 1.15).max(30.0)),
         "power" => (0.0, (peak * 1.2).max(50.0)),
         _ => (0.0, (peak * 1.1).max(1.0)),
     };
     let history = series.iter().map(|v| ((v - lo) / (hi - lo)).clamp(0.0, 1.0)).collect();
-    let note = latest.and_then(|s| s.error.clone()).filter(|_| metric != "fps" || value.is_none());
+    // NVML errors concern the graphics card only; FPS comes from RTSS and may still be there
+    let gpu_metric = GPU_METRICS.contains(&metric);
+    let note = latest.and_then(|s| s.error.clone()).filter(|_| gpu_metric && (metric != "fps" || value.is_none()));
     GpuTile { caption, value: text, unit: unit.into(), history, warn, note }
 }
 
@@ -220,6 +275,8 @@ mod tests {
         assert_eq!(next_metric("fps"), "load");
         assert_eq!(next_metric("fan"), "fps");
         assert_eq!(next_metric("bogus"), "fps");
+        assert_eq!(next_metric("cpu"), "cputemp");
+        assert_eq!(next_metric("ram"), "cpu");
     }
 
     #[test]
@@ -275,5 +332,38 @@ mod tests {
         let broken: std::collections::VecDeque<_> = [GpuStats { error: Some("no driver".into()), ..GpuStats::default() }].into();
         let t = tile("temp", "", &broken);
         assert_eq!((t.value, t.note.as_deref()), (None, Some("no driver")));
+    }
+
+    #[test]
+    fn cpu_and_ram_tiles() {
+        let s = GpuStats { cpu: Some(37.4), cpu_temp: Some(92.0), ram_used: Some(29_000.0), ram_total: Some(32_000.0), error: Some("no driver".into()), ..GpuStats::default() };
+        let h: std::collections::VecDeque<_> = [s].into();
+        let cpu = tile("cpu", "", &h);
+        assert_eq!((cpu.caption.as_str(), cpu.value.as_deref(), cpu.unit.as_str(), cpu.note.as_deref()), ("CPU", Some("37"), "%", None));
+        assert!(tile("cputemp", "", &h).warn);
+        let ram = tile("ram", "", &h);
+        assert_eq!(ram.unit, "GB");
+        assert!(ram.warn, "29 of 32 GB is over 90 %");
+        assert!(tile("load", "", &h).note.is_some(), "the NVML error stays on GPU tiles");
+    }
+
+    #[test]
+    fn cpu_load_from_system_times() {
+        assert_eq!(cpu_load((100, 1000), (175, 1100)), Some(25.0));
+        assert_eq!(cpu_load((100, 1000), (100, 1000)), None);
+        assert_eq!(cpu_load((100, 1000), (50, 900)), None);
+    }
+
+    /// Reads the real machine; run with `cargo test reads_cpu_and_memory -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn reads_cpu_and_memory() {
+        let mut m = CpuMeter::default();
+        assert_eq!(m.sample(), None);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let load = m.sample().expect("cpu load");
+        let (used, total) = memory().expect("memory");
+        println!("cpu {load:.1} %, ram {used:.0} / {total:.0} MiB");
+        assert!(total > used && used > 0.0);
     }
 }

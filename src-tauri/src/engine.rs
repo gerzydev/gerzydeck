@@ -1585,7 +1585,7 @@ mod sound_tests {
         r.images();
         let sample = crate::gpu::GpuStats { temp: Some(61.0), load: Some(40.0), ..Default::default() };
         r.e.handle(Msg::Gpu(sample.clone()));
-        let caption = crate::i18n::tr("TEPLOTA", "TEMP");
+        let caption = crate::i18n::tr("TEPLOTA GPU", "GPU TEMP");
         assert_eq!(r.images(), vec![(1, format!("{caption}=61").into_bytes())]);
         assert_eq!(r.states.lock().unwrap().last().unwrap().gpu.as_ref().and_then(|g| g.temp), Some(61.0));
         // every sample moves the graph, so the key is redrawn each time
