@@ -51,7 +51,9 @@
     "licenseFile": "LICENSE.txt",
     "resources": {
       "../README.md": "README.md",
-      "LICENSE.txt": "LICENSE.txt"
+      "LICENSE.txt": "LICENSE.txt",
+      "resources/presentmon/PresentMon.exe": "presentmon/PresentMon.exe",
+      "resources/presentmon/LICENSE.txt": "presentmon/LICENSE.txt"
     }
   }
 }

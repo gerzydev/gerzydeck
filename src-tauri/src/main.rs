@@ -178,6 +178,13 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     });
     *engine_slot.lock().unwrap() = Some(engine_tx.clone());
 
+    // GPU monitor keys: NVML + RTSS, read once a second while such a key is on the deck
+    let gpu_tx = engine_tx.clone();
+    let presentmon = app.path().resource_dir().ok().map(|d| d.join("presentmon").join("PresentMon.exe"));
+    gerzys_deck::gpu::spawn_poller(presentmon, move |stats| {
+        let _ = gpu_tx.send(Msg::Gpu(stats));
+    });
+
     // AI usage keys: the poller asks the engine which services are on screen
     let (ask, publish) = (engine_tx.clone(), engine_tx.clone());
     gerzys_deck::usage::spawn_poller(
@@ -306,6 +313,8 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            gerzys_deck::fps_permission::fps_permission,
+            gerzys_deck::fps_permission::grant_fps_permission,
             commands::get_config,
             commands::get_state,
             commands::set_config,

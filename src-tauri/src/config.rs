@@ -91,6 +91,13 @@ pub enum Action {
     /// Soundboard: `sound` is a stored sound id (empty for "stopAll"), `name` the original file name,
     /// `me`/`mic` volumes 0–100, `mode` "toggle" | "restart" | "stopAll" | "hold"
     Sound { sound: String, name: String, me: u8, mic: u8, mode: String },
+    /// Performance monitor: `metric` (slot 1) and up to two `extra` slots, each one of
+    /// `crate::gpu::METRICS`; pressing the key cycles through the slots for the session
+    Gpu {
+        metric: String,
+        #[serde(default)]
+        extra: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -233,6 +240,16 @@ pub fn normalize_action(v: &Value) -> Action {
                 let state = v["state"].as_u64().filter(|&n| n < 16).unwrap_or(0) as u8;
                 Action::Plugin { plugin, action, settings, state }
             }
+            "gpu" => {
+                let metric = v["metric"].as_str().filter(|m| crate::gpu::METRICS.contains(m)).unwrap_or("fps");
+                let mut extra: Vec<String> = Vec::new();
+                for m in v["extra"].as_array().into_iter().flatten().filter_map(|m| m.as_str()) {
+                    if crate::gpu::METRICS.contains(&m) && m != metric && !extra.iter().any(|e| e == m) && extra.len() < 2 {
+                        extra.push(m.into());
+                    }
+                }
+                Action::Gpu { metric: metric.into(), extra }
+            }
             "usage" => {
                 let provider = s(&v["provider"], 20);
                 let window = s(&v["window"], 20);
@@ -370,6 +387,28 @@ mod tests {
             }
         }
         p
+    }
+
+    #[test]
+    fn gpu_metrics_normalize_and_round_trip() {
+        for metric in ["cpu", "cputemp", "ram"] {
+            assert!(crate::gpu::METRICS.contains(&metric));
+            assert_eq!(normalize_action(&serde_json::json!({ "type": "gpu", "metric": metric })), Action::Gpu { metric: metric.into(), extra: vec![] });
+        }
+        for metric in crate::gpu::METRICS {
+            let action = normalize_action(&serde_json::json!({ "type": "gpu", "metric": metric }));
+            assert_eq!(action, Action::Gpu { metric: (*metric).into(), extra: vec![] });
+            assert_eq!(serde_json::to_value(&action).unwrap(), serde_json::json!({ "type": "gpu", "metric": metric, "extra": [] }));
+        }
+        for metric in [serde_json::Value::Null, serde_json::json!("bogus"), serde_json::json!("FPS"), serde_json::json!(7)] {
+            assert_eq!(normalize_action(&serde_json::json!({ "type": "gpu", "metric": metric })), Action::Gpu { metric: "fps".into(), extra: vec![] });
+        }
+        assert_eq!(normalize_action(&serde_json::json!({ "type": "gpu" })), Action::Gpu { metric: "fps".into(), extra: vec![] });
+        // up to two extra slots: valid, not repeating slot 1 or each other
+        assert_eq!(
+            normalize_action(&serde_json::json!({ "type": "gpu", "metric": "fps", "extra": ["fps", "bogus", "cputemp", "cputemp", 3, "load", "ram"] })),
+            Action::Gpu { metric: "fps".into(), extra: vec!["cputemp".into(), "load".into()] }
+        );
     }
 
     #[test]

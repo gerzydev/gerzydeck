@@ -12,6 +12,7 @@ Unofficial Windows software for the **Fifine AmpliGame D6** (15 LCD keys), a rep
 - **Stream Deck plugins:** install straight from the app, from the OpenAction catalogue and the Elgato store archive (OBS, Spotify, Discord, PC metrics and hundreds more).
 - **Unified plugin look:** plugin keys match the app’s style and keep changing with plugin state; switch back globally or per key.
 - **Soundboard:** a key plays a sound to your headphones and into your microphone at once, so people in a game or on Discord hear it too.
+- **Performance monitor:** CPU load and RAM from Windows, CPU temperature from MSI Afterburner, NVIDIA metrics via NVML and game FPS via PresentMon; choose up to three metric slots and press the key to cycle between them.
 - **AI usage:** keys showing your Claude and ChatGPT (Codex) plan limits and the time until they reset.
 - **Icons:** the Iconify catalogue (over 200,000 open-source icons), your own icon library and `.streamDeckIconPack` import.
 - **Boot logo:** your own 800 × 480 image shown when the deck is plugged in.
@@ -49,6 +50,18 @@ This is unofficial software and you use it **at your own risk**. The full terms 
 Assign a Sound action to play MP3, WAV, OGG or FLAC files (up to 50 MB), with separate volumes for your headphones and the microphone. Choose play/stop, restart, play while held, or stop all sounds. Test previews play only to your own output.
 
 To send sound into a game or Discord, use a virtual microphone. SteelSeries Sonar's “Microphone” playback device works out of the box with Auto. Alternatively, install the free VB-Audio Virtual Cable or Voicemeeter, pick its playback device in Settings → Soundboard, and select the corresponding virtual microphone in your game or Discord. Turn off Discord/Krisp noise suppression if it filters the sound.
+
+## Performance monitor
+
+Assign a **Performance monitor (GPU, CPU, RAM)** action and choose up to three different metric slots from any group. **Frames (PresentMon)** includes FPS, frame time, 1% low FPS, display latency, click latency and a CPU/GPU bottleneck label. **Graphics (NVIDIA)** includes GPU load, temperature, VRAM, power, core clock and fan speed. **Processor and memory** includes CPU load, CPU temperature and RAM. Slot 1 is shown at startup. Pressing the key cycles only between the selected slots; with one slot, pressing leaves it unchanged. Unavailable readings show a dash; RAM and VRAM show used/total GB with one decimal place.
+
+CPU load and RAM come directly from Windows and work without an NVIDIA card. CPU temperature requires **MSI Afterburner** running with **CPU temperature** enabled under **Settings → Monitoring**; the hottest reported CPU sensor is shown. NVIDIA readings use NVML from the installed NVIDIA driver.
+
+FPS uses the bundled **Intel PresentMon 2.6.0**, which reads Windows ETW events without injecting into the game. In the FPS action editor, click **Enable FPS measurement** to add your account to **Performance Log Users** (SID S-1-5-32-559) once and approve the Windows administrator prompt. Then **sign out of Windows and sign back in** so the new group membership becomes active. An already elevated process can measure FPS without this step.
+
+**RTSS** remains an optional fallback. Its OSD can stay off; set **Application detection level** to something other than **None** for monitored games, or set a game's own RTSS profile to **None** to exclude it.
+
+Third-party license: PresentMon is developed by Intel and distributed under the MIT license; see [PresentMon license](src-tauri/resources/presentmon/LICENSE.txt), included with the bundled executable.
 
 ## Development
 

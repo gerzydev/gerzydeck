@@ -13,11 +13,21 @@ const TEXT_NOTE = t("Typing text works in regular apps, games may ignore it.");
 
 const ACTION_TYPES = [
   ['none', t("None")], ['keys', t("Key / shortcut")], ['macro', t("Macro")], ['launch', t("Launch program / website")],
-  ['sound', t("Sound (soundboard)")], ['media', t("Media and volume")], ['system', t("System")], ['profile', t("Switch profile")], ['usage', t("AI usage (Claude, GPT)")], ['plugin', 'Plugin…'],
+  ['sound', t("Sound (soundboard)")], ['media', t("Media and volume")], ['system', t("System")], ['profile', t("Switch profile")], ['gpu', t("Performance monitor (GPU, CPU, RAM)")], ['usage', t("AI usage (Claude, GPT)")], ['plugin', 'Plugin…'],
 ];
 const MEDIA = [['playpause', t("Play / pause")], ['next', t("Next track")], ['prev', t("Previous track")], ['mute', t("Mute")], ['volup', t("Volume +")], ['voldown', t("Volume −")]];
 const SYSTEM = [['lock', t("Lock PC")], ['sleep', t("Sleep PC")]];
 const USAGE_PROVIDERS = [['claude', t("Claude (login from Claude Code)")], ['codex', t("ChatGPT (login from Codex)")]];
+const FRAME_METRICS = [
+  ['fps', 'FPS', 'FPS'], ['frametime', t("Frame time"), 'ms'], ['low1', t("1% low FPS"), 'FPS'],
+  ['latency', t("Display latency"), 'ms'], ['click', t("Click latency"), 'ms'], ['bound', t("Bottleneck (CPU/GPU)"), ''],
+];
+const GPU_METRICS = [
+  ['load', t("GPU load"), '%'], ['temp', t("GPU temperature"), '°C'],
+  ['vram', 'VRAM', 'GB'], ['power', t("Power draw"), 'W'], ['clock', t("Core clock"), 'MHz'], ['fan', t("Fan speed"), '%'],
+];
+const CPU_METRICS = [['cpu', t("CPU load"), '%'], ['cputemp', t("CPU temperature"), '°C'], ['ram', 'RAM', 'GB']];
+const MONITOR_METRICS = [...FRAME_METRICS, ...GPU_METRICS, ...CPU_METRICS];
 const USAGE_WINDOWS = [['session', t("5-hour window")], ['weekly', t("Weekly limit")]];
 const PROFILE_CYCLE = { __back: t("Previous profile"), __next: t("Next profile (cycle)"), __prev: t("Previous in order (cycle)") };
 const STEP_TYPES = [['tap', t("Tap")], ['down', t("Hold")], ['up', t("Release")], ['wait', t("Wait")], ['text', t("Type text")]];
@@ -73,6 +83,84 @@ function svgIcon(inner) {
   t.innerHTML = `<svg class="i" viewBox="0 0 24 24">${inner}</svg>`;
   return t.content.firstChild;
 }
+/**
+ * Dropdown in the app's style with group headings (a native <select> popup cannot be styled).
+ * groups: [[heading, [[value, label], …]], …]; optional firstItem has no heading.
+ * onChange(value) runs only on a real change.
+ */
+function groupedSelect(value, groups, onChange, firstItem = null) {
+  const items = [...(firstItem ? [firstItem] : []), ...groups.flatMap(([, list]) => list)];
+  const labelOf = (v) => items.find(([iv]) => iv === v)?.[1] ?? '';
+  const trigger = h('button', { type: 'button', class: 'rm-select rm-dd-trigger', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' }, labelOf(value));
+  let pop = null;
+  let active = Math.max(0, items.findIndex(([v]) => v === value));
+  const close = () => {
+    if (!pop) return;
+    pop.remove(); pop = null;
+    trigger.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', outside, true);
+    window.removeEventListener('resize', close);
+    window.removeEventListener('scroll', onScroll, true);
+  };
+  const outside = (e) => { if (pop && !pop.contains(e.target) && !trigger.contains(e.target)) close(); };
+  const onScroll = (e) => { if (pop && !pop.contains(e.target)) close(); };
+  const pick = (v) => { close(); trigger.focus(); if (v !== value) { value = v; trigger.textContent = labelOf(v); onChange(v); } };
+  const highlight = () => {
+    pop?.querySelectorAll('.rm-dd-option').forEach((el, i) => {
+      el.classList.toggle('is-active', i === active);
+      if (i === active) el.scrollIntoView({ block: 'nearest' });
+    });
+  };
+  const renderOption = ([v, label]) => h('div', {
+    class: 'rm-dd-option' + (v === value ? ' is-selected' : ''), role: 'option', 'aria-selected': String(v === value),
+    onpointerenter: () => { active = items.findIndex(([iv]) => iv === v); highlight(); },
+    onclick: () => pick(v),
+  }, h('span', {}, label), v === value && h('span', { class: 'rm-dd-check', 'aria-hidden': 'true' }, '✓'));
+  const open = () => {
+    if (trigger.disabled) return;
+    if (pop) return close();
+    active = Math.max(0, items.findIndex(([v]) => v === value));
+    pop = h('div', { class: 'rm-dd-pop', role: 'listbox' }, firstItem && renderOption(firstItem), groups.map(([heading, list], gi) => [
+      (gi > 0 || firstItem) && h('div', { class: 'rm-dd-sep' }),
+      h('div', { class: 'rm-dd-group' }, heading),
+      list.map(renderOption),
+    ]));
+    document.body.append(pop);
+    const r = trigger.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 12;
+    const height = Math.min(pop.scrollHeight, 560);
+    pop.style.width = r.width + 'px';
+    pop.style.left = r.left + 'px';
+    pop.style.top = (below >= height || below >= r.top ? r.bottom + 6 : r.top - 6 - height) + 'px';
+    pop.style.maxHeight = Math.max(160, Math.min(560, below >= height ? below : Math.max(below, r.top - 12))) + 'px';
+    trigger.setAttribute('aria-expanded', 'true');
+    highlight();
+    document.addEventListener('pointerdown', outside, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', onScroll, true);
+  };
+  trigger.addEventListener('click', open);
+  trigger.addEventListener('keydown', (e) => {
+    if (!pop && ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); open(); return; }
+    if (!pop) return;
+    if (e.key === 'Escape' || e.key === 'Tab') { close(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; highlight(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; highlight(); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(items[active][0]); }
+  });
+  return trigger;
+}
+
+/** A changed slot wins duplicates; compact remaining slots, including the required first one. */
+function setMonitorSlot(action, index, value) {
+  const slots = [action.metric, ...(action.extra ?? [])];
+  slots[index] = value;
+  if (value) for (let i = 0; i < slots.length; i++) if (i !== index && slots[i] === value) slots[i] = '';
+  const chosen = slots.filter(Boolean);
+  action.metric = chosen[0] ?? 'fps';
+  action.extra = chosen.slice(1, 3);
+}
+
 const option = (value, label, selected) => h('option', { value, selected: value === selected }, label);
 const codeName = (c) => NAMES[c] ?? (c.startsWith('Key') ? c.slice(3) : c.startsWith('Digit') ? c.slice(5) : c.startsWith('Numpad') ? `Num ${c.slice(6)}` : c);
 const sortCodes = (list) => [...list.filter((c) => MODS.includes(c)), ...list.filter((c) => !MODS.includes(c))];
@@ -116,6 +204,7 @@ function actionSummary(a) {
     case 'media': return MEDIA.find(([v]) => v === a.command)?.[1] ?? t("Media");
     case 'system': return SYSTEM.find(([v]) => v === a.command)?.[1] ?? t("System");
     case 'plugin': return pluginAction(a.plugin, a.action).action?.name ?? 'Plugin';
+    case 'gpu': return t("Monitor: {0}", [a.metric, ...(a.extra ?? [])].map((metric) => MONITOR_METRICS.find(([m]) => m === metric)?.[1] ?? 'FPS').join(' → '));
     case 'usage': return `${a.provider === 'claude' ? 'Claude' : 'GPT'} – ${a.window === 'weekly' ? t("week") : t("5h window")}`;
     case 'profile': return PROFILE_CYCLE[a.profileId] ?? t("Profile: {0}", config.profiles.find((p) => p.id === a.profileId)?.name ?? '?');
     default: return t("No action");
@@ -142,6 +231,10 @@ function fillTile(btn, cfg, k) {
     imageUrl(cfg.image).then((u) => { if (u) img.src = u; });
     btn.append(img);
     if (cfg.label) btn.append(h('span', { class: 'shade' }));
+  }
+  if (cfg.action?.type === 'gpu') {
+    btn.append(gpuPreview(cfg), h('span', { class: 'num' }, k));
+    return;
   }
   if (cfg.action?.type === 'usage') {
     btn.append(usagePreview(cfg));
@@ -184,6 +277,64 @@ function usagePreview(cfg) {
       h('span', { class: 'u-reset' }, t("in {0}", resetText(w.resetsAt))));
   }
   return box;
+}
+
+/** Latest performance sample; null measurements remain visibly unavailable, never zero. */
+function gpuPreview(cfg) {
+  const [metric, caption, unit] = MONITOR_METRICS.find(([m]) => m === cfg.action.metric) ?? FRAME_METRICS[0];
+  const gpu = state.gpu;
+  const number = (v) => Number.isFinite(v) ? Math.round(v).toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-US') : '–';
+  const frame = FRAME_METRICS.some(([m]) => m === metric);
+  const graphics = GPU_METRICS.some(([m]) => m === metric);
+  const field = { cputemp: 'cpuTemp', frametime: 'frameTime', low1: 'fpsLow', click: 'clickLatency', bound: 'gpuBound' }[metric] ?? metric;
+  const reading = gpu?.[field];
+  const memory = metric === 'vram' || metric === 'ram';
+  const gb = (v) => Number.isFinite(v) ? (v / 1024).toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '–';
+  const permissionNeeded = frame && !Number.isFinite(reading) && gpu?.fpsError === 'permission';
+  const value = permissionNeeded ? t("Enable FPS") : memory ? gpu ? gb(gpu[metric === 'ram' ? 'ramUsed' : 'vramUsed']) + ' / ' + gb(gpu[metric === 'ram' ? 'ramTotal' : 'vramTotal']) : '–'
+    : metric === 'bound' ? Number.isFinite(reading) ? reading >= 90 ? 'GPU' : 'CPU' : '–'
+    : ['frametime', 'latency', 'click'].includes(metric) ? Number.isFinite(reading) ? reading.toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '–'
+    : number(reading);
+  const box = h('span', { class: 'usage-prev gpu-prev', title: graphics ? gpu?.name || '' : caption },
+    h('span', { class: 'u-name' }, cfg.label || caption),
+    h('span', { class: memory || permissionNeeded ? 'gpu-value is-wide' : 'gpu-value' }, value),
+    h('span', { class: 'gpu-unit' }, permissionNeeded ? '' : unit));
+  if (graphics && gpu?.error) box.append(h('span', { class: 'u-msg' }, gpu.error));
+  else if (frame && !permissionNeeded && gpu?.fpsApp) box.append(h('span', { class: 'u-reset gpu-app', title: gpu.fpsApp }, gpu.fpsApp));
+  return box;
+}
+
+let fpsPermissionGrant = null;
+function fpsPermissionPanel() {
+  const panel = h('div', { class: 'rm-note is-info fps-permission' });
+  let status = null;
+  let error = null;
+  const draw = () => {
+    if (error) {
+      panel.replaceChildren(h('span', { class: 'rm-meta' }, error),
+        h('button', { class: 'rm-btn is-sm', type: 'button', onclick: load }, t("Retry")));
+    } else if (!status) panel.replaceChildren(h('span', { class: 'rm-meta' }, t("Loading…")));
+    else if (status.active) panel.replaceChildren(h('span', { class: 'rm-meta' }, t("FPS is measured by PresentMon.")));
+    else if (status.added) panel.replaceChildren(h('span', {}, t("Sign out and sign back in, then FPS will work.")));
+    else panel.replaceChildren(
+      h('span', { class: 'rm-meta' }, t("Enable FPS once by adding your account to Performance Log Users. Windows asks for administrator approval. PresentMon does not inject into the game.")),
+      h('button', { class: 'rm-btn is-sm', type: 'button', disabled: Boolean(fpsPermissionGrant), onclick: async () => {
+        if (fpsPermissionGrant) return;
+        fpsPermissionGrant = invoke('grant_fps_permission');
+        draw();
+        try { await fpsPermissionGrant; } catch (e) { toast(e); }
+        finally { fpsPermissionGrant = null; await load(); }
+      } }, fpsPermissionGrant ? t("Waiting for administrator approval…") : t("Enable FPS measurement")));
+  };
+  async function load() {
+    error = null; status = null; draw();
+    // A newly opened inspector must also wait for an already-running UAC request.
+    if (fpsPermissionGrant) { try { await fpsPermissionGrant; } catch { /* the requesting panel reports it */ } }
+    try { status = await invoke('fps_permission'); } catch (e) { error = String(e); }
+    draw();
+  }
+  load();
+  return panel;
 }
 
 function refreshTile(k) {
@@ -375,9 +526,10 @@ const ACTION_ICONS = {
   system: '<path d="M12 3v8"/><path d="M6.3 6.6a8 8 0 1 0 11.4 0"/>',
   profile: '<path d="M7 7h12l-3-3"/><path d="M17 17H5l3 3"/>',
   plugin: '<path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/>',
+  gpu: '<rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="12" cy="12" r="4"/><path d="M12 8v8M8 12h8M8 2v3M16 2v3M8 19v3M16 19v3M1 9h3M1 15h3M20 9h3M20 15h3"/>',
   usage: '<path d="M4 15a8 8 0 0 1 16 0"/><path d="M12 15l4-5"/><path d="M4 19h16"/>',
 };
-const ACTION_SHORT = { none: t("None"), keys: t("Key"), macro: t("Macro"), launch: t("Launch"), sound: t("Sound"), media: t("Media"), system: t("System"), profile: t("Profile"), usage: t("AI usage"), plugin: 'Plugin' };
+const ACTION_SHORT = { none: t("None"), keys: t("Key"), macro: t("Macro"), launch: t("Launch"), sound: t("Sound"), media: t("Media"), system: t("System"), profile: t("Profile"), gpu: t("Monitor"), usage: t("AI usage"), plugin: 'Plugin' };
 
 /** Grid of action types; the Plugin tile shows the chosen plugin action. */
 function actionGrid(cfg, onPick) {
@@ -407,6 +559,7 @@ function defaultAction(type) {
     case 'media': return { type, command: 'playpause' };
     case 'system': return { type, command: 'lock' };
     case 'profile': return { type, profileId: '__back' };
+    case 'gpu': return { type, metric: 'fps', extra: [] };
     case 'usage': return { type, provider: 'claude', window: 'session' };
     default: return { type: 'none' };
   }
@@ -534,6 +687,23 @@ function actionFields(cfg, changed, redraw, k) {
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, MEDIA.map(([v, l]) => option(v, l, a.command)))];
     case 'system':
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, SYSTEM.map(([v, l]) => option(v, l, a.command)))];
+    case 'gpu': {
+      const slots = [a.metric, ...(a.extra ?? [])];
+      const groups = [[t("Frames (PresentMon)"), FRAME_METRICS], [t("Graphics (NVIDIA)"), GPU_METRICS], [t("Processor and memory"), CPU_METRICS]];
+      const rows = [0, 1, 2].map((i) => {
+        const select = groupedSelect(slots[i] ?? '', groups, (v) => { setMonitorSlot(a, i, v); changed(); redraw(); },
+          i > 0 ? ['', t("— none —")] : null);
+        select.disabled = i === 2 && !slots[1];
+        const label = t("Slot {0}", i + 1);
+        select.setAttribute('aria-label', label);
+        return h('div', { class: 'rm-field monitor-slot' }, h('span', { class: 'rm-label' }, label), select);
+      });
+      return [
+        ...rows,
+        ...(slots.some((metric) => FRAME_METRICS.some(([m]) => m === metric)) ? [fpsPermissionPanel()] : []),
+        h('div', { class: 'rm-meta' }, t("FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to switch between the selected slots.")),
+      ];
+    }
     case 'usage':
       return [
         h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Service")),
@@ -813,7 +983,7 @@ function onState(s) {
   renderBanners();
   if (!config) return;
   if (page === 'deck') {
-    for (let k = 1; k <= 15; k++) if (['usage', 'sound'].includes(keyCfg(k).action?.type)) refreshTile(k);
+    for (let k = 1; k <= 15; k++) if (['usage', 'sound', 'gpu'].includes(keyCfg(k).action?.type)) refreshTile(k);
   }
   renderProfileSelect();
   if (profileChanged && page !== 'settings') renderPage();

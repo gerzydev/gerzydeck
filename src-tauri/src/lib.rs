@@ -18,3 +18,8 @@ pub mod icon_commands;
 pub mod usage;
 pub mod i18n;
 pub mod sound;
+pub mod gpu;
+pub mod rtss;
+pub mod afterburner;
+pub mod presentmon;
+pub mod fps_permission;
