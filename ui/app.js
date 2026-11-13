@@ -83,6 +83,71 @@ function svgIcon(inner) {
   t.innerHTML = `<svg class="i" viewBox="0 0 24 24">${inner}</svg>`;
   return t.content.firstChild;
 }
+/**
+ * Dropdown in the app's style with group headings (a native <select> popup cannot be styled).
+ * groups: [[heading, [[value, label], …]], …]; onChange(value) runs only on a real change.
+ */
+function groupedSelect(value, groups, onChange) {
+  const items = groups.flatMap(([, list]) => list);
+  const labelOf = (v) => items.find(([iv]) => iv === v)?.[1] ?? '';
+  const trigger = h('button', { type: 'button', class: 'rm-select rm-dd-trigger', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' }, labelOf(value));
+  let pop = null;
+  let active = Math.max(0, items.findIndex(([v]) => v === value));
+  const close = () => {
+    if (!pop) return;
+    pop.remove(); pop = null;
+    trigger.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', outside, true);
+    window.removeEventListener('resize', close);
+    window.removeEventListener('scroll', onScroll, true);
+  };
+  const outside = (e) => { if (pop && !pop.contains(e.target) && !trigger.contains(e.target)) close(); };
+  const onScroll = (e) => { if (pop && !pop.contains(e.target)) close(); };
+  const pick = (v) => { close(); trigger.focus(); if (v !== value) { value = v; trigger.textContent = labelOf(v); onChange(v); } };
+  const highlight = () => {
+    pop?.querySelectorAll('.rm-dd-option').forEach((el, i) => {
+      el.classList.toggle('is-active', i === active);
+      if (i === active) el.scrollIntoView({ block: 'nearest' });
+    });
+  };
+  const open = () => {
+    if (pop) return close();
+    active = Math.max(0, items.findIndex(([v]) => v === value));
+    pop = h('div', { class: 'rm-dd-pop', role: 'listbox' }, groups.map(([heading, list], gi) => [
+      gi > 0 && h('div', { class: 'rm-dd-sep' }),
+      h('div', { class: 'rm-dd-group' }, heading),
+      list.map(([v, label]) => h('div', {
+        class: 'rm-dd-option' + (v === value ? ' is-selected' : ''), role: 'option', 'aria-selected': String(v === value),
+        onpointerenter: () => { active = items.findIndex(([iv]) => iv === v); highlight(); },
+        onclick: () => pick(v),
+      }, h('span', {}, label), v === value && h('span', { class: 'rm-dd-check', 'aria-hidden': 'true' }, '✓'))),
+    ]));
+    document.body.append(pop);
+    const r = trigger.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 12;
+    const height = Math.min(pop.scrollHeight, 560);
+    pop.style.width = r.width + 'px';
+    pop.style.left = r.left + 'px';
+    pop.style.top = (below >= height || below >= r.top ? r.bottom + 6 : r.top - 6 - height) + 'px';
+    pop.style.maxHeight = Math.max(160, Math.min(560, below >= height ? below : Math.max(below, r.top - 12))) + 'px';
+    trigger.setAttribute('aria-expanded', 'true');
+    highlight();
+    document.addEventListener('pointerdown', outside, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', onScroll, true);
+  };
+  trigger.addEventListener('click', open);
+  trigger.addEventListener('keydown', (e) => {
+    if (!pop && ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); open(); return; }
+    if (!pop) return;
+    if (e.key === 'Escape' || e.key === 'Tab') { close(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; highlight(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; highlight(); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(items[active][0]); }
+  });
+  return trigger;
+}
+
 const option = (value, label, selected) => h('option', { value, selected: value === selected }, label);
 const codeName = (c) => NAMES[c] ?? (c.startsWith('Key') ? c.slice(3) : c.startsWith('Digit') ? c.slice(5) : c.startsWith('Numpad') ? `Num ${c.slice(6)}` : c);
 const sortCodes = (list) => [...list.filter((c) => MODS.includes(c)), ...list.filter((c) => !MODS.includes(c))];
@@ -611,11 +676,9 @@ function actionFields(cfg, changed, redraw, k) {
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, SYSTEM.map(([v, l]) => option(v, l, a.command)))];
     case 'gpu':
       return [
-        ...[[t("Frames (PresentMon)"), FRAME_METRICS], [t("Graphics (NVIDIA)"), GPU_METRICS], [t("Processor and memory"), CPU_METRICS]].map(([group, metrics]) =>
-          h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, group),
-            h('div', { class: 'metric-chips', role: 'radiogroup', 'aria-label': group }, metrics.map(([v, label]) =>
-              h('button', { type: 'button', class: 'metric-chip', role: 'radio', 'aria-checked': String(a.metric === v),
-                onclick: () => { if (a.metric === v) return; a.metric = v; changed(); redraw(); } }, label))))),
+        h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Metric")),
+          groupedSelect(a.metric, [[t("Frames (PresentMon)"), FRAME_METRICS], [t("Graphics (NVIDIA)"), GPU_METRICS], [t("Processor and memory"), CPU_METRICS]],
+            (v) => { a.metric = v; changed(); redraw(); })),
         ...(FRAME_METRICS.some(([m]) => m === a.metric) ? [fpsPermissionPanel()] : []),
         h('div', { class: 'rm-meta' }, t("FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to cycle metrics within its group.")),
       ];
