@@ -21,6 +21,13 @@ export function plural(n, one, many, csOne, csFew, csMany) {
 }
 
 const CS = {
+  "Frames (PresentMon)": "Snímky (PresentMon)",
+  "Frame time": "Doba snímku",
+  "1% low FPS": "1% low FPS",
+  "Display latency": "Latence zobrazení",
+  "Click latency": "Odezva kliknutí",
+  "Bottleneck (CPU/GPU)": "Limituje (CPU/GPU)",
+
   "Enable FPS": "Povol FPS",
   "FPS is measured by PresentMon.": "FPS měří PresentMon.",
   "Sign out and sign back in, then FPS will work.": "Odhlas se a znovu přihlas, pak FPS poběží.",

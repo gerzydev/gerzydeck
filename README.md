@@ -53,7 +53,7 @@ To send sound into a game or Discord, use a virtual microphone. SteelSeries Sona
 
 ## Performance monitor
 
-Assign a **Performance monitor (GPU, CPU, RAM)** action and choose its initial metric. **Graphics (NVIDIA)** includes FPS, GPU load, temperature, VRAM, power, core clock and fan speed. **Processor and memory** includes CPU load, CPU temperature and RAM. Pressing the key cycles within the selected group. Unavailable readings show a dash; RAM and VRAM show used/total GB with one decimal place.
+Assign a **Performance monitor (GPU, CPU, RAM)** action and choose its initial metric. **Frames (PresentMon)** includes FPS, frame time, 1% low FPS, display latency, click latency and a CPU/GPU bottleneck label. **Graphics (NVIDIA)** includes GPU load, temperature, VRAM, power, core clock and fan speed. **Processor and memory** includes CPU load, CPU temperature and RAM. Pressing the key cycles within the selected group. Unavailable readings show a dash; RAM and VRAM show used/total GB with one decimal place.
 
 CPU load and RAM come directly from Windows and work without an NVIDIA card. CPU temperature requires **MSI Afterburner** running with **CPU temperature** enabled under **Settings → Monitoring**; the hottest reported CPU sensor is shown. NVIDIA readings use NVML from the installed NVIDIA driver.
 
