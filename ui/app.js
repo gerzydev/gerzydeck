@@ -220,7 +220,7 @@ function gpuPreview(cfg) {
   const box = h('span', { class: 'usage-prev gpu-prev', title: graphics ? gpu?.name || '' : caption },
     h('span', { class: 'u-name' }, cfg.label || caption),
     h('span', { class: memory || permissionNeeded ? 'gpu-value is-wide' : 'gpu-value' }, value),
-    h('span', { class: 'gpu-unit' }, unit));
+    h('span', { class: 'gpu-unit' }, permissionNeeded ? '' : unit));
   if (graphics && gpu?.error) box.append(h('span', { class: 'u-msg' }, gpu.error));
   else if (frame && !permissionNeeded && gpu?.fpsApp) box.append(h('span', { class: 'u-reset gpu-app', title: gpu.fpsApp }, gpu.fpsApp));
   return box;
