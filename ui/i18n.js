@@ -21,6 +21,15 @@ export function plural(n, one, many, csOne, csFew, csMany) {
 }
 
 const CS = {
+  "GPU monitor (NVIDIA)": "Monitor GPU (NVIDIA)",
+  "GPU load": "Zátěž GPU",
+  "GPU temperature": "Teplota GPU",
+  "Power draw": "Spotřeba",
+  "Core clock": "Takt jádra",
+  "Fan speed": "Ventilátor",
+  "GPU: {0}": "GPU: {0}",
+  "Metric": "Metrika",
+  "FPS needs RivaTuner Statistics Server running; its overlay can stay off. Press the deck key to cycle through metrics.": "FPS vyžaduje běžící RivaTuner Statistics Server; overlay může být vypnutý. Stiskem klávesy na decku přepneš zobrazený údaj.",
   "Unified plugin look": "Jednotný vzhled pluginů",
   "Original plugin look": "Původní vzhled pluginu",
   "Plugin keys get the app's style; they still change with the plugin's state.": "Klávesy pluginů mají vzhled aplikace a dál se mění podle stavu pluginu.",
