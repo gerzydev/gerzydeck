@@ -19,6 +19,7 @@ const MEDIA = [['playpause', t("Play / pause")], ['next', t("Next track")], ['pr
 const SYSTEM = [['lock', t("Lock PC")], ['sleep', t("Sleep PC")]];
 const USAGE_PROVIDERS = [['claude', t("Claude (login from Claude Code)")], ['codex', t("ChatGPT (login from Codex)")]];
 const USAGE_WINDOWS = [['session', t("5-hour window")], ['weekly', t("Weekly limit")]];
+const PROFILE_CYCLE = { __back: t("Previous profile"), __next: t("Next profile (cycle)"), __prev: t("Previous in order (cycle)") };
 const STEP_TYPES = [['tap', t("Tap")], ['down', t("Hold")], ['up', t("Release")], ['wait', t("Wait")], ['text', t("Type text")]];
 const MODS = ['ControlLeft', 'ControlRight', 'ShiftLeft', 'ShiftRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight'];
 const NAMES = {
@@ -116,7 +117,7 @@ function actionSummary(a) {
     case 'system': return SYSTEM.find(([v]) => v === a.command)?.[1] ?? t("System");
     case 'plugin': return pluginAction(a.plugin, a.action).action?.name ?? 'Plugin';
     case 'usage': return `${a.provider === 'claude' ? 'Claude' : 'GPT'} – ${a.window === 'weekly' ? t("week") : t("5h window")}`;
-    case 'profile': return a.profileId === '__back' ? t("Previous profile") : t("Profile: {0}", config.profiles.find((p) => p.id === a.profileId)?.name ?? '?');
+    case 'profile': return PROFILE_CYCLE[a.profileId] ?? t("Profile: {0}", config.profiles.find((p) => p.id === a.profileId)?.name ?? '?');
     default: return t("No action");
   }
 }
@@ -544,6 +545,8 @@ function actionFields(cfg, changed, redraw, k) {
     case 'profile':
       return [h('select', { class: 'rm-select', onchange: (e) => { a.profileId = e.target.value; changed(); } },
         option('__back', t("Previous profile"), a.profileId),
+        option('__next', t("Next profile (cycle)"), a.profileId),
+        option('__prev', t("Previous in order (cycle)"), a.profileId),
         config.profiles.map((p) => option(p.id, p.name, a.profileId)))];
     default:
       return [h('div', { class: 'rm-meta' }, t("The key does nothing. Pick an action or use a template."))];

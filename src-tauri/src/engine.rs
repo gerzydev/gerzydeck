@@ -307,7 +307,17 @@ impl Engine {
     }
 
     fn switch(&mut self, id: String) {
-        let target = if id == "__back" { self.previous_profile.clone() } else { Some(id) };
+        let target = match id.as_str() {
+            "__back" => self.previous_profile.clone(),
+            // cycle through the profiles in their list order, wrapping around
+            "__next" | "__prev" => {
+                let list = &self.config.profiles;
+                let i = list.iter().position(|p| p.id == self.state.active_profile_id).unwrap_or(0);
+                let j = if id == "__next" { (i + 1) % list.len() } else { (i + list.len() - 1) % list.len() };
+                Some(list[j].id.clone())
+            }
+            _ => Some(id),
+        };
         if let Some(t) = target {
             self.set_active(t);
         }
@@ -1286,6 +1296,20 @@ mod tests {
         t.send(Msg::SetActiveProfile("B".into()));
         t.send(Msg::SwitchProfile("__back".into()));
         assert_eq!(t.state().active_profile_id, "A");
+    }
+
+    #[test]
+    fn next_and_prev_cycle_through_profiles_with_wraparound() {
+        let t = T::new();
+        let ids: Vec<String> = t.config().profiles.iter().map(|p| p.id.clone()).collect();
+        assert!(ids.len() >= 2);
+        assert_eq!(t.state().active_profile_id, ids[0]);
+        for expected in ids.iter().skip(1).chain(std::iter::once(&ids[0])) {
+            t.send(Msg::SwitchProfile("__next".into()));
+            assert_eq!(&t.state().active_profile_id, expected);
+        }
+        t.send(Msg::SwitchProfile("__prev".into()));
+        assert_eq!(&t.state().active_profile_id, ids.last().unwrap(), "prev from the first wraps to the last");
     }
 
     #[test]

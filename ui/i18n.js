@@ -25,6 +25,8 @@ const CS = {
   "Original plugin look": "Původní vzhled pluginu",
   "Plugin keys get the app's style; they still change with the plugin's state.": "Klávesy pluginů mají vzhled aplikace a dál se mění podle stavu pluginu.",
   "Play while held": "Hrát, dokud držím",
+  "Next profile (cycle)": "Další profil (dokola)",
+  "Previous in order (cycle)": "Předchozí v pořadí (dokola)",
   "Sound (soundboard)": "Zvuk (soundboard)",
   "Sound: {0}": "Zvuk: {0}",
   "Sound (no file)": "Zvuk (bez souboru)",
