@@ -151,6 +151,127 @@ fn discord_file(file: &str) -> Option<String> {
     Some(centred(g, color, cap))
 }
 
+// ---------- Essentials for Spotify (com.ntanis.essentials-for-spotify) ----------
+// The plugin switches between its own files in images/states/. A file is named after what a
+// press does ("like" = not liked yet, "unlike" = liked), "-unknown" = state not known yet.
+// Active toggles are green, available ones accent, errors red, waiting/unknown grey.
+
+const PLAY: &str = r#"<path d="M7.5 4.5v15l12-7.5z"/>"#;
+const PAUSE: &str = r#"<path d="M8 5v14M16 5v14"/>"#;
+const NEXT: &str = r#"<path d="M5 5l10 7-10 7z"/><path d="M19 5v14"/>"#;
+const PREVIOUS: &str = r#"<path d="M19 5 9 12l10 7z"/><path d="M5 5v14"/>"#;
+const FORWARD: &str = r#"<path d="M2.5 6l8.5 6-8.5 6zM12.5 6l8.5 6-8.5 6z"/>"#;
+const BACKWARD: &str = r#"<path d="M21.5 6 13 12l8.5 6zM11.5 6 3 12l8.5 6z"/>"#;
+const SHUFFLE: &str = r#"<path d="M3 7h3c2 0 3.2 1 4.2 2.6l2.6 4.8C13.8 16 15 17 17 17h4M3 17h3c2 0 3.2-1 4.2-2.6M13.8 9.6C14.8 8 16 7 18 7h3M18.5 4.5 21 7l-2.5 2.5M18.5 14.5 21 17l-2.5 2.5"/>"#;
+const REPEAT: &str = r#"<path d="M17 3l3.5 3.5L17 10"/><path d="M3.5 11.5V10.5a4 4 0 0 1 4-4h13"/><path d="M7 21l-3.5-3.5L7 14"/><path d="M20.5 12.5v1a4 4 0 0 1-4 4h-13"/>"#;
+const ONE: &str = r#"<path d="M11 10.5l1.5-1v5"/>"#;
+const HEART: &str = r#"<path d="M12 20s-8-4.6-8-10.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 8 2.5C20 15.4 12 20 12 20z"/>"#;
+const LIST_ADD: &str = r#"<path d="M3.5 6h12M3.5 11h12M3.5 16h7M18 13.5v7M14.5 17h7"/>"#;
+const LIST_MUSIC: &str = r#"<path d="M3.5 6h11M3.5 11h11M3.5 16h6"/><circle cx="16" cy="18" r="2.5"/><path d="M18.5 18V9.5l3-1"/>"#;
+const NOTE_FILE: &str = r#"<path d="M6 2.5h8l4.5 4.5v14.5H6z"/><path d="M14 2.5V7h4.5"/><circle cx="10.5" cy="16.5" r="2"/><path d="M12.5 16.5v-6l2.5 1"/>"#;
+const RADIO: &str = r#"<circle cx="12" cy="12" r="1.5"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.5 5.5a9.2 9.2 0 0 0 0 13M18.5 5.5a9.2 9.2 0 0 1 0 13"/>"#;
+const MUSIC_BOX: &str = r#"<rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="10" cy="15.5" r="2"/><path d="M12 15.5V8l4 1.5"/>"#;
+const CLIPBOARD: &str = r#"<rect x="5" y="4.5" width="14" height="17" rx="2"/><path d="M9 3h6v3H9zM12 10.5v6M9 13.5h6"/>"#;
+const EXPLICIT: &str = r#"<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M14.5 8h-5v8h5M9.5 12h4"/>"#;
+const DEVICES: &str = r#"<rect x="2.5" y="4" width="13" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="11" rx="1.5"/>"#;
+const USER: &str = r#"<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>"#;
+const GEAR: &str = r#"<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>"#;
+const CLOUD_ALERT: &str = r#"<path d="M7 18.5a4.5 4.5 0 0 1-.5-9 6 6 0 0 1 11.5 1.5 4 4 0 0 1-.5 7.5z"/><path d="M12 10.5v3.5M12 16.5h.01"/>"#;
+const ALERT: &str = r#"<path d="M12 3 2.5 20h19z"/><path d="M12 9.5v5M12 17h.01"/>"#;
+const BAN: &str = r#"<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>"#;
+const HOURGLASS: &str = r#"<path d="M6.5 3h11M6.5 21h11M7.5 3c0 5 9 6 9 9s-9 4-9 9M16.5 3c0 5-9 6-9 9s9 4 9 9"/>"#;
+const CHECK: &str = r#"<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>"#;
+const FOLDER: &str = r#"<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z"/>"#;
+const SPEAKER_BODY: &str = r#"<path d="M10 4.5 5 8.5H2.5v7H5l5 4z"/>"#;
+const WAVES: &str = r#"<path d="M14 9a4.5 4.5 0 0 1 0 6M17 6.5a8 8 0 0 1 0 11"/>"#;
+const CROSS: &str = r#"<path d="M14.5 9.5l5 5M19.5 9.5l-5 5"/>"#;
+
+/// "?" badge for states the plugin doesn't know yet.
+const UNKNOWN_BADGE: &str = r##"<circle cx="112" cy="33" r="13" fill="#6b7078"/><text x="112" y="39" text-anchor="middle" font-family="Segoe UI, DM Sans, sans-serif" font-size="17" font-weight="700" fill="#101214">?</text>"##;
+
+/// Speaker with a level bar under it (volume-stack-<n>[-muted]).
+fn volume_level(level: u32, muted: bool) -> String {
+    let color = if muted { RED } else { ACCENT };
+    let g = format!("{SPEAKER_BODY}{}", if muted { CROSS } else { WAVES });
+    let width = 80.0 * level.min(100) as f32 / 100.0;
+    frame_with(color, &format!(
+        r##"{}<rect x="32" y="106" width="80" height="9" rx="4.5" fill="#ffffff" fill-opacity="0.08"/><rect x="32" y="106" width="{width}" height="9" rx="4.5" fill="{color}"/>"##,
+        glyph(&g, color, 45.0, 22.0, 2.25)
+    ))
+}
+
+fn spotify_file(file: &str) -> Option<String> {
+    let name = file.strip_prefix("images/states/")?;
+    if let Some(rest) = name.strip_prefix("volume-stack-") {
+        let (n, muted) = rest.strip_suffix("-muted").map_or((rest, false), |n| (n, true));
+        if let Ok(level) = n.parse::<u32>() {
+            return Some(volume_level(level, muted));
+        }
+    }
+    let (name, unknown) = name.strip_suffix("-unknown").map_or((name, false), |n| (n, true));
+    let repeat_one = format!("{REPEAT}{ONE}");
+    let vol_up = format!(r#"{SPEAKER_BODY}<path d="M14.5 12h6M17.5 9v6"/>"#);
+    let vol_down = format!(r#"{SPEAKER_BODY}<path d="M14.5 12h6"/>"#);
+    let vol_on = format!("{SPEAKER_BODY}{WAVES}");
+    let vol_muted = format!("{SPEAKER_BODY}{CROSS}");
+    let vol_low = format!(r#"{SPEAKER_BODY}<path d="M14 9a4.5 4.5 0 0 1 0 6"/>"#);
+    let devices_off = with_slash(DEVICES);
+    let (g, color, filled): (&str, &str, bool) = match name {
+        "play" => (PLAY, ACCENT, false),
+        "pause" => (PAUSE, GREEN, false),
+        "next" => (NEXT, ACCENT, false),
+        "previous" => (PREVIOUS, ACCENT, false),
+        "forward-seek" => (FORWARD, ACCENT, false),
+        "backward-seek" => (BACKWARD, ACCENT, false),
+        "shuffle" | "shuffle-inactive" => (SHUFFLE, ACCENT, false),
+        "shuffle-active" => (SHUFFLE, GREEN, false),
+        "loop" | "loop-inactive" => (REPEAT, ACCENT, false),
+        "loop-active" => (REPEAT, GREEN, false),
+        "loop-one" | "loop-one-inactive" => (&repeat_one, ACCENT, false),
+        "loop-one-active" => (&repeat_one, GREEN, false),
+        "like" => (HEART, ACCENT, false),
+        "unlike" => (HEART, GREEN, true),
+        "add-to-playlist" => (LIST_ADD, ACCENT, false),
+        "context-information" | "items" | "playlists" => (LIST_MUSIC, ACCENT, false),
+        "song-stack" => (NOTE_FILE, ACCENT, false),
+        "play-context" => (RADIO, ACCENT, false),
+        "playback-control" => (MUSIC_BOX, ACCENT, false),
+        "song-clipboard" => (CLIPBOARD, ACCENT, false),
+        "song-explicit" => (EXPLICIT, RED, false),
+        "song-not-explicit" => (EXPLICIT, GREY, false),
+        "transfer-playback" => (DEVICES, ACCENT, false),
+        "transfer-playback-offline" => (&devices_off, RED, false),
+        "user-information" => (USER, ACCENT, false),
+        "volume-up" => (&vol_up, ACCENT, false),
+        "volume-down" => (&vol_down, ACCENT, false),
+        "volume-mute" | "volume-stack" => (&vol_on, ACCENT, false),
+        "volume-unmute" => (&vol_muted, RED, false),
+        "set-volume" => (&vol_low, ACCENT, false),
+        "volume-control" => (MIXER, ACCENT, false),
+        "setup" => (GEAR, ACCENT, false),
+        "no-setup" => (GEAR, GREY, false),
+        "setup-error" => (GEAR, RED, false),
+        "api-error" => (CLOUD_ALERT, RED, false),
+        "api-rate-limited" => (CLOCK, RED, false),
+        "fatal-error" => (ALERT, RED, false),
+        "no-device-error" => (&devices_off, RED, false),
+        "not-available" => (BAN, GREY, false),
+        "busy" | "pending" => (HOURGLASS, GREY, false),
+        "success" => (CHECK, GREEN, false),
+        "local" => (FOLDER, ACCENT, false),
+        _ => return None,
+    };
+    let color = if unknown { GREY } else { color };
+    let mut inner = glyph(g, color, 42.0, 42.0, 2.5);
+    if filled {
+        inner = inner.replacen(r#"fill="none""#, &format!(r#"fill="{color}" fill-opacity="0.35""#), 1);
+    }
+    if unknown {
+        inner.push_str(UNKNOWN_BADGE);
+    }
+    Some(frame_with(color, &inner))
+}
+
 // ---------- public API ----------
 
 /// Skin for an image a plugin shows on a key.
@@ -164,6 +285,7 @@ pub fn skin_svg(plugin: &str, action: &str, image: &str, list: bool) -> Option<S
     match plugin {
         "me.amankhanna.oasystem" => system_tile(action, list),
         "me.amankhanna.oadiscord" => discord_file(&base(image)),
+        "com.ntanis.essentials-for-spotify" => spotify_file(&base(image)),
         _ => None,
     }
 }
@@ -173,6 +295,7 @@ pub fn plugin_icon_svg(plugin: &str) -> Option<String> {
     let g = match plugin {
         "me.amankhanna.oasystem" => PULSE,
         "me.amankhanna.oadiscord" => CHAT,
+        "com.ntanis.essentials-for-spotify" => MUSIC_BOX,
         _ => return None,
     };
     Some(frame_with(ACCENT, &glyph(g, ACCENT, 36.0, 36.0, 3.0)))
@@ -245,6 +368,22 @@ mod tests {
         assert!(skin_svg("me.amankhanna.oasystem", "me.amankhanna.oasystem.gpu", "icon", false).is_none());
     }
 
+    pub(super) const SPOTIFY: &[&str] = &["add-to-playlist", "add-to-playlist-unknown", "api-error", "api-rate-limited", "backward-seek", "busy", "context-information", "context-information-unknown", "fatal-error", "forward-seek", "items", "like", "like-unknown", "local", "loop-active", "loop-inactive", "loop-one-active", "loop-one-inactive", "loop-one-unknown", "loop-unknown", "next", "no-device-error", "no-setup", "not-available", "pause", "pending", "play", "play-context", "play-context-unknown", "playback-control", "playlists", "previous", "set-volume", "setup", "setup-error", "shuffle-active", "shuffle-inactive", "shuffle-unknown", "song-clipboard", "song-explicit", "song-explicit-unknown", "song-not-explicit", "song-stack", "song-stack-unknown", "success", "transfer-playback", "transfer-playback-offline", "transfer-playback-unknown", "unlike", "user-information", "user-information-unknown", "volume-control", "volume-down", "volume-mute", "volume-mute-unknown", "volume-stack-10", "volume-stack-50-muted", "volume-stack-100", "volume-stack-unknown", "volume-unmute", "volume-up"];
+
+    #[test]
+    fn spotify_states_are_skinned() {
+        for f in SPOTIFY {
+            let svg = skin_svg("com.ntanis.essentials-for-spotify", "x", &format!("images/states/{f}.png"), false).unwrap_or_else(|| panic!("{f}"));
+            render(&svg);
+        }
+        // composites the plugin builds from parts are left to the generic look
+        for f in ["long", "mode-stack-1-0-1", "volume-stack-abc"] {
+            assert!(skin_svg("com.ntanis.essentials-for-spotify", "x", &format!("images/states/{f}"), false).is_none(), "{f}");
+        }
+        let bar = |svg: String| render(&svg).get_pixel(36, 110)[0];
+        assert!(bar(volume_level(100, false)) > 200 && bar(volume_level(0, false)) < 80, "level bar follows the volume");
+    }
+
     #[test]
     fn other_plugins_and_icons() {
         assert!(skin_svg("com.elgato.cpu", "com.elgato.cpu.action", "icon", false).is_none());
@@ -288,6 +427,9 @@ fn tests_list() -> Vec<(String, String)> {
         "voicechannel_0", "voicechannel_1", "soundboard", "notifications", "serverStats",
     ] {
         v.push((f.into(), skin_svg("me.amankhanna.oadiscord", "x", &format!("actions/{f}"), false).unwrap()));
+    }
+    for f in tests::SPOTIFY {
+        v.push((f.to_string(), skin_svg("com.ntanis.essentials-for-spotify", "x", &format!("images/states/{f}"), false).unwrap()));
     }
     v
 }
