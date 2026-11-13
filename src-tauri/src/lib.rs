@@ -21,3 +21,4 @@ pub mod sound;
 pub mod gpu;
 pub mod rtss;
 pub mod afterburner;
+pub mod presentmon;

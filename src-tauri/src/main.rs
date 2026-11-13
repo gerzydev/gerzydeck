@@ -180,7 +180,8 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
 
     // GPU monitor keys: NVML + RTSS, read once a second while such a key is on the deck
     let gpu_tx = engine_tx.clone();
-    gerzys_deck::gpu::spawn_poller(move |stats| {
+    let presentmon = app.path().resource_dir().ok().map(|d| d.join("presentmon").join("PresentMon.exe"));
+    gerzys_deck::gpu::spawn_poller(presentmon, move |stats| {
         let _ = gpu_tx.send(Msg::Gpu(stats));
     });
 

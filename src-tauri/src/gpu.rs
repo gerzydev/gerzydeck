@@ -45,8 +45,12 @@ const POLL: std::time::Duration = std::time::Duration::from_secs(1);
 /// how long to wait before trying to load nvml.dll again after it failed
 const NVML_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// stop PresentMon after this long without a monitor key on the deck
+const FPS_IDLE: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Reads the GPU once a second while `WANTED` is set and hands every sample to `publish`.
-pub fn spawn_poller(publish: impl Fn(GpuStats) + Send + 'static) -> std::thread::JoinHandle<()> {
+/// `presentmon` is the bundled PresentMon.exe (FPS); RTSS is the fallback.
+pub fn spawn_poller(presentmon: Option<std::path::PathBuf>, publish: impl Fn(GpuStats) + Send + 'static) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("gpu".into())
         .spawn(move || {
@@ -54,11 +58,18 @@ pub fn spawn_poller(publish: impl Fn(GpuStats) + Send + 'static) -> std::thread:
             let mut nvml_error: Option<String> = None;
             let mut last_try: Option<std::time::Instant> = None;
             let mut cpu = CpuMeter::default();
+            let mut pm = crate::presentmon::PresentMon::new(presentmon);
+            let mut last_wanted = std::time::Instant::now();
             loop {
                 std::thread::sleep(POLL);
                 if !WANTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    if pm.running() && last_wanted.elapsed() > FPS_IDLE {
+                        pm.stop();
+                    }
                     continue;
                 }
+                last_wanted = std::time::Instant::now();
+                pm.ensure();
                 if nvml.is_none() && last_try.is_none_or(|t| t.elapsed() >= NVML_RETRY) {
                     last_try = Some(std::time::Instant::now());
                     match nvml_wrapper::Nvml::init() {
@@ -76,9 +87,15 @@ pub fn spawn_poller(publish: impl Fn(GpuStats) + Send + 'static) -> std::thread:
                     Some(n) => sample(n),
                     None => GpuStats { error: nvml_error.clone(), ..GpuStats::default() },
                 };
-                if let Some(f) = crate::rtss::read_fps(foreground_pid()) {
+                let fg = foreground_pid();
+                if let Some((fps, app)) = fg.and_then(|pid| pm.fps(pid)) {
+                    stats.fps = Some(fps);
+                    stats.fps_app = Some(app);
+                } else if let Some(f) = crate::rtss::read_fps(fg) {
                     stats.fps = Some(f.fps);
                     stats.fps_app = Some(f.app);
+                } else {
+                    stats.fps_error = pm.error().map(String::from);
                 }
                 stats.cpu = cpu.sample();
                 stats.cpu_temp = crate::afterburner::read_cpu_temp();
@@ -264,7 +281,11 @@ pub fn tile(metric: &str, label: &str, history: &std::collections::VecDeque<GpuS
     let history = series.iter().map(|v| ((v - lo) / (hi - lo)).clamp(0.0, 1.0)).collect();
     // NVML errors concern the graphics card only; FPS comes from RTSS and may still be there
     let gpu_metric = GPU_METRICS.contains(&metric);
-    let note = latest.and_then(|s| s.error.clone()).filter(|_| gpu_metric && (metric != "fps" || value.is_none()));
+    let fps_note = latest.and_then(|s| s.fps_error.as_deref()).filter(|_| metric == "fps" && value.is_none()).map(|e| match e {
+        "permission" => crate::i18n::tr("Povol měření FPS", "Allow FPS capture").to_string(),
+        _ => crate::i18n::tr("FPS nedostupné", "FPS unavailable").to_string(),
+    });
+    let note = fps_note.or_else(|| latest.and_then(|s| s.error.clone()).filter(|_| gpu_metric && (metric != "fps" || value.is_none())));
     GpuTile { caption, value: text, unit: unit.into(), history, warn, note }
 }
 
@@ -367,5 +388,14 @@ mod tests {
         let (used, total) = memory().expect("memory");
         println!("cpu {load:.1} %, ram {used:.0} / {total:.0} MiB");
         assert!(total > used && used > 0.0);
+    }
+
+    #[test]
+    fn fps_without_permission_says_so() {
+        let h: std::collections::VecDeque<_> = [GpuStats { fps_error: Some("permission".into()), ..GpuStats::default() }].into();
+        let t = tile("fps", "", &h);
+        assert_eq!(t.value, None);
+        assert_eq!(t.note.as_deref(), Some(crate::i18n::tr("Povol měření FPS", "Allow FPS capture")));
+        assert_eq!(tile("load", "", &h).note, None);
     }
 }
