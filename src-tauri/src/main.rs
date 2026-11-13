@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use gerzys_deck::commands::{self, EngineTx};
+use gerzys_deck::commands::{self, EngineTx, SoundTx};
 use gerzys_deck::config::Config;
 use gerzys_deck::device::{spawn_device, DeckOptions, HidApiBackend};
 use gerzys_deck::engine::{spawn_engine, EngineDeps, EventSink, Msg, PluginTile, State};
@@ -156,6 +156,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     let (dev_events_tx, dev_events_rx) = channel();
     let (device_tx, device_handle) = spawn_device(HidApiBackend::default(), DeckOptions::default(), dev_events_tx);
     let (usage_wake_tx, usage_wake_rx) = channel();
+    let sound_tx = gerzys_deck::sound::spawn_player(&dir);
     let (engine_tx, engine_handle) = spawn_engine(EngineDeps {
         store,
         device_tx,
@@ -168,6 +169,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
         render_usage: |t| gerzys_deck::render::render_usage_jpeg(&t.name, t.percent, t.reset.as_deref(), t.error.as_deref(), t.bg),
         usage_wake: Some(usage_wake_tx),
         host_tx: Some(host_tx.clone()),
+        sound_tx: Some(sound_tx.clone()),
     });
     *engine_slot.lock().unwrap() = Some(engine_tx.clone());
 
@@ -214,6 +216,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     })?;
 
     app.manage(EngineTx(engine_tx));
+    app.manage(SoundTx(sound_tx));
     app.manage(HostTx(Mutex::new(host_tx)));
     app.manage(PluginNet::new());
     app.manage(Workers(Mutex::new(vec![engine_handle, device_handle])));
@@ -301,6 +304,11 @@ fn main() {
             commands::get_config,
             commands::get_state,
             commands::set_config,
+            commands::import_sound,
+            commands::list_audio_outputs,
+            commands::auto_mic_device,
+            commands::preview_sound,
+            commands::stop_sounds,
             commands::set_active_profile,
             commands::swap_keys,
             commands::set_boot_logo,

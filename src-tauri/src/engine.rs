@@ -154,6 +154,8 @@ pub struct EngineDeps {
     /// wakes the usage poller (a usage key was pressed)
     pub usage_wake: Option<Sender<()>>,
     pub host_tx: Option<Sender<HostCmd>>,
+    /// soundboard playback thread
+    pub sound_tx: Option<Sender<crate::sound::SoundCmd>>,
 }
 
 fn key_map_array(m: &Option<Vec<u8>>) -> Option<[u8; 15]> {
@@ -175,6 +177,7 @@ struct Engine {
     render_plugin: fn(&PluginTile) -> Vec<u8>,
     render_usage: fn(&UsageTile) -> Vec<u8>,
     usage_wake: Option<Sender<()>>,
+    sound_tx: Option<Sender<crate::sound::SoundCmd>>,
     usage: HashMap<String, Result<crate::usage::Usage, String>>,
     host_tx: Option<Sender<HostCmd>>,
     /// action instances the host was told are visible (context → instance)
@@ -216,6 +219,7 @@ impl Engine {
             render_plugin: d.render_plugin,
             render_usage: d.render_usage,
             usage_wake: d.usage_wake,
+            sound_tx: d.sound_tx,
             usage: HashMap::new(),
             host_tx: d.host_tx,
             visible: HashMap::new(),
@@ -227,11 +231,29 @@ impl Engine {
             user_images: HashMap::new(),
         };
         e.refresh_name();
+        e.send_sound_devices();
         e
     }
 
     fn active(&self) -> &crate::config::Profile {
         self.config.profiles.iter().find(|p| p.id == self.state.active_profile_id).unwrap_or(&self.config.profiles[0])
+    }
+
+    fn send_sound_devices(&self) {
+        if let Some(tx) = &self.sound_tx {
+            let _ = tx.send(crate::sound::SoundCmd::SetDevices { me: self.config.sound_me_device.clone(), mic: self.config.sound_mic_device.clone() });
+        }
+    }
+
+    fn play_sound(&self, action: &Action) {
+        let (Some(tx), Action::Sound { sound, me, mic, mode, .. }) = (&self.sound_tx, action) else { return };
+        use crate::sound::{Mode, SoundCmd};
+        let cmd = match mode.as_str() {
+            "stopAll" => SoundCmd::StopAll,
+            _ if sound.is_empty() => return,
+            m => SoundCmd::Press { sound: sound.clone(), me: *me, mic: *mic, mode: if m == "restart" { Mode::Restart } else { Mode::Toggle } },
+        };
+        let _ = tx.send(cmd);
     }
 
     fn refresh_name(&mut self) {
@@ -601,6 +623,9 @@ impl Engine {
                     let _ = w.send(());
                 }
             }
+            if matches!(action, Action::Sound { .. }) {
+                self.play_sound(&action);
+            }
             let _ = self.runner.press(key, &action);
             let switches: Vec<String> = std::mem::take(&mut *self.pending_switches.lock().unwrap());
             for id in switches {
@@ -630,13 +655,18 @@ impl Engine {
         }
         self.store.save(&cfg).map_err(|e| crate::trf!("Uložení selhalo: {e}", "Saving failed: {e}"))?;
         self.store.prune_images(&cfg);
+        self.store.prune_sounds(&cfg);
         if cfg.brightness != self.config.brightness {
             let _ = self.device_tx.send(DeviceCmd::SetBrightness(cfg.brightness));
         }
         if cfg.key_map != self.config.key_map {
             let _ = self.device_tx.send(DeviceCmd::SetKeyMap(key_map_array(&cfg.key_map)));
         }
+        let devices_changed = cfg.sound_me_device != self.config.sound_me_device || cfg.sound_mic_device != self.config.sound_mic_device;
         self.config = cfg;
+        if devices_changed {
+            self.send_sound_devices();
+        }
         if !self.exists(&self.state.manual_profile_id) {
             self.state.manual_profile_id = self.config.default_profile_id.clone();
         }
@@ -950,6 +980,7 @@ mod tests {
                 render_plugin,
                 render_usage: |_| Vec::new(),
                 usage_wake: None,
+            sound_tx: None,
                 host_tx: Some(htx),
             });
             let t = T { tx, dev: drx, _host: hrx, kb, sink, store };
@@ -1122,6 +1153,7 @@ mod tests {
             render_plugin,
             render_usage: |_| Vec::new(),
             usage_wake: None,
+            sound_tx: None,
             host_tx: None,
         });
         let (r, rx) = channel();

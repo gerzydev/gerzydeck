@@ -128,6 +128,26 @@ impl Store {
             }
         }
     }
+
+    /// Deletes stored sounds no key uses any more.
+    pub fn prune_sounds(&self, cfg: &Config) {
+        let used: std::collections::HashSet<&str> = cfg
+            .profiles
+            .iter()
+            .flat_map(|p| p.keys.values())
+            .filter_map(|k| match &k.action {
+                crate::config::Action::Sound { sound, .. } => Some(sound.as_str()),
+                _ => None,
+            })
+            .collect();
+        let Ok(entries) = std::fs::read_dir(crate::sound::sounds_dir(&self.dir)) else { return };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if crate::sound::is_sound_id(&name) && !used.contains(name.as_str()) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
 }
 
 #[cfg(test)]

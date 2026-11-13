@@ -21,10 +21,20 @@ pub struct Config {
     /// UI and core texts: "en" (default) or "cs"
     #[serde(default = "default_language")]
     pub language: String,
+    /// soundboard output for the user: "" = Windows default, else a device name
+    #[serde(default)]
+    pub sound_me_device: String,
+    /// soundboard output into the microphone: "auto" (Sonar / VB-Cable / Voicemeeter), "none", or a device name
+    #[serde(default = "default_mic_device")]
+    pub sound_mic_device: String,
 }
 
 fn default_language() -> String {
     "en".into()
+}
+
+fn default_mic_device() -> String {
+    "auto".into()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -72,6 +82,9 @@ pub enum Action {
     Plugin { plugin: String, action: String, settings: Value, state: u8 },
     /// AI plan usage on the key: provider "claude" | "codex", window "session" (5 h) | "weekly"
     Usage { provider: String, window: String },
+    /// Soundboard: `sound` is a stored sound id (empty for "stopAll"), `name` the original file name,
+    /// `me`/`mic` volumes 0–100, `mode` "toggle" | "restart" | "stopAll"
+    Sound { sound: String, name: String, me: u8, mic: u8, mode: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -120,6 +133,8 @@ pub fn create_default_config() -> Config {
         active_profile_id: p.id.clone(),
         profiles: vec![p],
         language: default_language(),
+        sound_me_device: String::new(),
+        sound_mic_device: default_mic_device(),
     }
 }
 
@@ -219,6 +234,19 @@ pub fn normalize_action(v: &Value) -> Action {
                 }
                 Action::Usage { provider, window }
             }
+            "sound" => {
+                let mode = s(&v["mode"], 20);
+                if !matches!(mode.as_str(), "toggle" | "restart" | "stopAll") {
+                    return None;
+                }
+                let sound = s(&v["sound"], 40);
+                let sound = if mode == "stopAll" { String::new() } else { sound };
+                if mode != "stopAll" && !(sound.is_empty() || crate::sound::is_sound_id(&sound)) {
+                    return None;
+                }
+                let vol = |x: &Value| x.as_u64().map(|n| n.min(100) as u8).unwrap_or(80);
+                Action::Sound { sound, name: s(&v["name"], 120), me: vol(&v["me"]), mic: vol(&v["mic"]), mode }
+            }
             "profile" => {
                 let profile_id = s(&v["profileId"], 64);
                 if profile_id.is_empty() {
@@ -300,6 +328,8 @@ pub fn normalize_config(raw: &Value) -> Config {
         active_profile_id,
         profiles,
         language: if raw["language"].as_str() == Some("cs") { "cs".into() } else { default_language() },
+        sound_me_device: s(&raw["soundMeDevice"], 200),
+        sound_mic_device: raw["soundMicDevice"].as_str().filter(|d| !d.is_empty()).map(|d| d.chars().take(200).collect()).unwrap_or_else(default_mic_device),
     }
 }
 
@@ -344,6 +374,28 @@ mod tests {
         assert_eq!(c.profiles[0].key(7).bg, "#141618");
         assert_eq!(c.active_profile_id, c.profiles[0].id);
         assert_eq!(normalize_config(&serde_json::to_value(&c).unwrap()), c);
+    }
+
+    #[test]
+    fn sound_actions_and_outputs() {
+        let ok = normalize_action(&json!({ "type": "sound", "sound": "0123456789abcdef.mp3", "name": "boom.mp3", "me": 150, "mic": 40, "mode": "toggle" }));
+        assert_eq!(ok, Action::Sound { sound: "0123456789abcdef.mp3".into(), name: "boom.mp3".into(), me: 100, mic: 40, mode: "toggle".into() });
+        let fresh = normalize_action(&json!({ "type": "sound", "sound": "", "mode": "restart" }));
+        assert_eq!(fresh, Action::Sound { sound: String::new(), name: String::new(), me: 80, mic: 80, mode: "restart".into() });
+        let stop = normalize_action(&json!({ "type": "sound", "sound": "0123456789abcdef.mp3", "mode": "stopAll" }));
+        assert!(matches!(stop, Action::Sound { ref sound, .. } if sound.is_empty()));
+        assert_eq!(normalize_action(&json!({ "type": "sound", "sound": "../../evil.mp3", "mode": "toggle" })), Action::None);
+        assert_eq!(normalize_action(&json!({ "type": "sound", "sound": "", "mode": "loop" })), Action::None);
+
+        let c = create_default_config();
+        assert_eq!((c.sound_me_device.as_str(), c.sound_mic_device.as_str()), ("", "auto"));
+        let mut raw = serde_json::to_value(&c).unwrap();
+        raw["soundMicDevice"] = json!("none");
+        raw["soundMeDevice"] = json!("Sluchátka (ASUS XONAR U5)");
+        let n = normalize_config(&raw);
+        assert_eq!((n.sound_me_device.as_str(), n.sound_mic_device.as_str()), ("Sluchátka (ASUS XONAR U5)", "none"));
+        raw.as_object_mut().unwrap().remove("soundMicDevice");
+        assert_eq!(normalize_config(&raw).sound_mic_device, "auto", "older configs get auto");
     }
 
     #[test]

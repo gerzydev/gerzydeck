@@ -100,3 +100,39 @@ pub async fn set_autostart(app: tauri::AppHandle, on: bool) -> Result<(), String
     let al = app.autolaunch();
     if on { al.enable() } else { al.disable() }.map_err(|e| e.to_string())
 }
+
+// ---------- soundboard ----------
+
+pub struct SoundTx(pub Sender<crate::sound::SoundCmd>);
+
+/// Raw body: `invoke('import_sound', uint8Array)` → stored sound id.
+#[tauri::command]
+pub async fn import_sound(request: Request<'_>) -> Result<String, String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err(crate::i18n::tr("Očekávám data zvuku", "Expected sound data").into());
+    };
+    crate::sound::import(&crate::store::data_dir(), bytes)
+}
+
+#[tauri::command]
+pub async fn list_audio_outputs() -> Vec<String> {
+    crate::sound::list_outputs()
+}
+
+/// The device "auto" picks for the microphone right now.
+#[tauri::command]
+pub async fn auto_mic_device() -> Option<String> {
+    crate::sound::auto_mic(&crate::sound::list_outputs())
+}
+
+/// Editor test button: only to the user's own output, never into the microphone.
+#[tauri::command]
+pub async fn preview_sound(tx: tauri::State<'_, SoundTx>, sound: String, volume: u8) -> Result<(), String> {
+    let cmd = crate::sound::SoundCmd::Press { sound, me: volume, mic: 0, mode: crate::sound::Mode::Restart };
+    tx.0.send(cmd).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn stop_sounds(tx: tauri::State<'_, SoundTx>) -> Result<(), String> {
+    tx.0.send(crate::sound::SoundCmd::StopAll).map_err(|e| e.to_string())
+}

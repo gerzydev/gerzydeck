@@ -86,6 +86,7 @@ impl P {
             render_plugin,
             render_usage,
             usage_wake: Some(wtx),
+            sound_tx: None,
             host_tx: Some(htx),
         });
         let p = P { tx, dev: drx, host: hrx, kb, store, wake: wrx };
