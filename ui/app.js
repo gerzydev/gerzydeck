@@ -611,11 +611,11 @@ function actionFields(cfg, changed, redraw, k) {
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, SYSTEM.map(([v, l]) => option(v, l, a.command)))];
     case 'gpu':
       return [
-        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Metric")),
-          h('select', { class: 'rm-select', onchange: (e) => { a.metric = e.target.value; changed(); redraw(); } },
-            h('optgroup', { label: t("Frames (PresentMon)") }, FRAME_METRICS.map(([v, label]) => option(v, label, a.metric))),
-            h('optgroup', { label: t("Graphics (NVIDIA)") }, GPU_METRICS.map(([v, label]) => option(v, label, a.metric))),
-            h('optgroup', { label: t("Processor and memory") }, CPU_METRICS.map(([v, label]) => option(v, label, a.metric))))),
+        ...[[t("Frames (PresentMon)"), FRAME_METRICS], [t("Graphics (NVIDIA)"), GPU_METRICS], [t("Processor and memory"), CPU_METRICS]].map(([group, metrics]) =>
+          h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, group),
+            h('div', { class: 'metric-chips', role: 'radiogroup', 'aria-label': group }, metrics.map(([v, label]) =>
+              h('button', { type: 'button', class: 'metric-chip', role: 'radio', 'aria-checked': String(a.metric === v),
+                onclick: () => { if (a.metric === v) return; a.metric = v; changed(); redraw(); } }, label))))),
         ...(FRAME_METRICS.some(([m]) => m === a.metric) ? [fpsPermissionPanel()] : []),
         h('div', { class: 'rm-meta' }, t("FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to cycle metrics within its group.")),
       ];
