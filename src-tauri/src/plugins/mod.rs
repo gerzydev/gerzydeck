@@ -12,6 +12,7 @@ pub mod manifest;
 pub mod protocol;
 pub mod scheme;
 pub mod server;
+pub mod skins;
 pub mod webview;
 
 /// `%APPDATA%\GerzysDeck\plugins`
