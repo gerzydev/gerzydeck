@@ -236,6 +236,10 @@ pub fn normalize_action(v: &Value) -> Action {
                 let state = v["state"].as_u64().filter(|&n| n < 16).unwrap_or(0) as u8;
                 Action::Plugin { plugin, action, settings, state }
             }
+            "gpu" => {
+                let metric = v["metric"].as_str().filter(|m| crate::gpu::METRICS.contains(m)).unwrap_or("fps");
+                Action::Gpu { metric: metric.into() }
+            }
             "usage" => {
                 let provider = s(&v["provider"], 20);
                 let window = s(&v["window"], 20);
@@ -373,6 +377,19 @@ mod tests {
             }
         }
         p
+    }
+
+    #[test]
+    fn gpu_metrics_normalize_and_round_trip() {
+        for metric in crate::gpu::METRICS {
+            let action = normalize_action(&serde_json::json!({ "type": "gpu", "metric": metric }));
+            assert_eq!(action, Action::Gpu { metric: (*metric).into() });
+            assert_eq!(serde_json::to_value(&action).unwrap(), serde_json::json!({ "type": "gpu", "metric": metric }));
+        }
+        for metric in [serde_json::Value::Null, serde_json::json!("bogus"), serde_json::json!("FPS"), serde_json::json!(7)] {
+            assert_eq!(normalize_action(&serde_json::json!({ "type": "gpu", "metric": metric })), Action::Gpu { metric: "fps".into() });
+        }
+        assert_eq!(normalize_action(&serde_json::json!({ "type": "gpu" })), Action::Gpu { metric: "fps".into() });
     }
 
     #[test]
