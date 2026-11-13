@@ -85,10 +85,11 @@ function svgIcon(inner) {
 }
 /**
  * Dropdown in the app's style with group headings (a native <select> popup cannot be styled).
- * groups: [[heading, [[value, label], …]], …]; onChange(value) runs only on a real change.
+ * groups: [[heading, [[value, label], …]], …]; optional firstItem has no heading.
+ * onChange(value) runs only on a real change.
  */
-function groupedSelect(value, groups, onChange) {
-  const items = groups.flatMap(([, list]) => list);
+function groupedSelect(value, groups, onChange, firstItem = null) {
+  const items = [...(firstItem ? [firstItem] : []), ...groups.flatMap(([, list]) => list)];
   const labelOf = (v) => items.find(([iv]) => iv === v)?.[1] ?? '';
   const trigger = h('button', { type: 'button', class: 'rm-select rm-dd-trigger', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' }, labelOf(value));
   let pop = null;
@@ -110,17 +111,19 @@ function groupedSelect(value, groups, onChange) {
       if (i === active) el.scrollIntoView({ block: 'nearest' });
     });
   };
+  const renderOption = ([v, label]) => h('div', {
+    class: 'rm-dd-option' + (v === value ? ' is-selected' : ''), role: 'option', 'aria-selected': String(v === value),
+    onpointerenter: () => { active = items.findIndex(([iv]) => iv === v); highlight(); },
+    onclick: () => pick(v),
+  }, h('span', {}, label), v === value && h('span', { class: 'rm-dd-check', 'aria-hidden': 'true' }, '✓'));
   const open = () => {
+    if (trigger.disabled) return;
     if (pop) return close();
     active = Math.max(0, items.findIndex(([v]) => v === value));
-    pop = h('div', { class: 'rm-dd-pop', role: 'listbox' }, groups.map(([heading, list], gi) => [
-      gi > 0 && h('div', { class: 'rm-dd-sep' }),
+    pop = h('div', { class: 'rm-dd-pop', role: 'listbox' }, firstItem && renderOption(firstItem), groups.map(([heading, list], gi) => [
+      (gi > 0 || firstItem) && h('div', { class: 'rm-dd-sep' }),
       h('div', { class: 'rm-dd-group' }, heading),
-      list.map(([v, label]) => h('div', {
-        class: 'rm-dd-option' + (v === value ? ' is-selected' : ''), role: 'option', 'aria-selected': String(v === value),
-        onpointerenter: () => { active = items.findIndex(([iv]) => iv === v); highlight(); },
-        onclick: () => pick(v),
-      }, h('span', {}, label), v === value && h('span', { class: 'rm-dd-check', 'aria-hidden': 'true' }, '✓'))),
+      list.map(renderOption),
     ]));
     document.body.append(pop);
     const r = trigger.getBoundingClientRect();
@@ -146,6 +149,16 @@ function groupedSelect(value, groups, onChange) {
     else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(items[active][0]); }
   });
   return trigger;
+}
+
+/** A changed slot wins duplicates; compact remaining slots, including the required first one. */
+function setMonitorSlot(action, index, value) {
+  const slots = [action.metric, ...(action.extra ?? [])];
+  slots[index] = value;
+  if (value) for (let i = 0; i < slots.length; i++) if (i !== index && slots[i] === value) slots[i] = '';
+  const chosen = slots.filter(Boolean);
+  action.metric = chosen[0] ?? 'fps';
+  action.extra = chosen.slice(1, 3);
 }
 
 const option = (value, label, selected) => h('option', { value, selected: value === selected }, label);
@@ -191,7 +204,7 @@ function actionSummary(a) {
     case 'media': return MEDIA.find(([v]) => v === a.command)?.[1] ?? t("Media");
     case 'system': return SYSTEM.find(([v]) => v === a.command)?.[1] ?? t("System");
     case 'plugin': return pluginAction(a.plugin, a.action).action?.name ?? 'Plugin';
-    case 'gpu': return t("Monitor: {0}", MONITOR_METRICS.find(([m]) => m === a.metric)?.[1] ?? 'FPS');
+    case 'gpu': return t("Monitor: {0}", [a.metric, ...(a.extra ?? [])].map((metric) => MONITOR_METRICS.find(([m]) => m === metric)?.[1] ?? 'FPS').join(' → '));
     case 'usage': return `${a.provider === 'claude' ? 'Claude' : 'GPT'} – ${a.window === 'weekly' ? t("week") : t("5h window")}`;
     case 'profile': return PROFILE_CYCLE[a.profileId] ?? t("Profile: {0}", config.profiles.find((p) => p.id === a.profileId)?.name ?? '?');
     default: return t("No action");
@@ -546,7 +559,7 @@ function defaultAction(type) {
     case 'media': return { type, command: 'playpause' };
     case 'system': return { type, command: 'lock' };
     case 'profile': return { type, profileId: '__back' };
-    case 'gpu': return { type, metric: 'fps' };
+    case 'gpu': return { type, metric: 'fps', extra: [] };
     case 'usage': return { type, provider: 'claude', window: 'session' };
     default: return { type: 'none' };
   }
@@ -674,14 +687,23 @@ function actionFields(cfg, changed, redraw, k) {
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, MEDIA.map(([v, l]) => option(v, l, a.command)))];
     case 'system':
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, SYSTEM.map(([v, l]) => option(v, l, a.command)))];
-    case 'gpu':
+    case 'gpu': {
+      const slots = [a.metric, ...(a.extra ?? [])];
+      const groups = [[t("Frames (PresentMon)"), FRAME_METRICS], [t("Graphics (NVIDIA)"), GPU_METRICS], [t("Processor and memory"), CPU_METRICS]];
+      const rows = [0, 1, 2].map((i) => {
+        const select = groupedSelect(slots[i] ?? '', groups, (v) => { setMonitorSlot(a, i, v); changed(); redraw(); },
+          i > 0 ? ['', t("— none —")] : null);
+        select.disabled = i === 2 && !slots[1];
+        const label = t("Slot {0}", i + 1);
+        select.setAttribute('aria-label', label);
+        return h('div', { class: 'rm-field monitor-slot' }, h('span', { class: 'rm-label' }, label), select);
+      });
       return [
-        h('div', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Metric")),
-          groupedSelect(a.metric, [[t("Frames (PresentMon)"), FRAME_METRICS], [t("Graphics (NVIDIA)"), GPU_METRICS], [t("Processor and memory"), CPU_METRICS]],
-            (v) => { a.metric = v; changed(); redraw(); })),
-        ...(FRAME_METRICS.some(([m]) => m === a.metric) ? [fpsPermissionPanel()] : []),
-        h('div', { class: 'rm-meta' }, t("FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to cycle metrics within its group.")),
+        ...rows,
+        ...(slots.some((metric) => FRAME_METRICS.some(([m]) => m === metric)) ? [fpsPermissionPanel()] : []),
+        h('div', { class: 'rm-meta' }, t("FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to switch between the selected slots.")),
       ];
+    }
     case 'usage':
       return [
         h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Service")),

@@ -21,6 +21,8 @@ export function plural(n, one, many, csOne, csFew, csMany) {
 }
 
 const CS = {
+  "Slot {0}": "Slot {0}",
+  "— none —": "— nic —",
   "Frames (PresentMon)": "Snímky (PresentMon)",
   "Frame time": "Doba snímku",
   "1% low FPS": "1% low FPS",
@@ -35,7 +37,7 @@ const CS = {
   "Waiting for administrator approval…": "Čekám na potvrzení správce…",
   "Enable FPS measurement": "Povolit měření FPS",
   "Retry": "Zkusit znovu",
-  "FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to cycle metrics within its group.": "FPS měří PresentMon (Windows ETW, funguje i s anti-cheatem); RTSS je volitelná záloha. Teplota CPU potřebuje běžící MSI Afterburner se zapnutou teplotou CPU v Nastavení → Monitorování. Stiskem klávesy na decku přepneš údaj v rámci jeho skupiny.",
+  "FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to switch between the selected slots.": "FPS měří PresentMon (Windows ETW, funguje i s anti-cheatem); RTSS je volitelná záloha. Teplota CPU potřebuje běžící MSI Afterburner se zapnutou teplotou CPU v Nastavení → Monitorování. Stiskem klávesy přepínáš mezi vybranými sloty.",
 
   "Monitor": "Monitor",
   "CPU load": "CPU zátěž",
