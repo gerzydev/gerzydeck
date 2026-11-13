@@ -153,3 +153,30 @@ mod tests {
         assert_eq!(sample.app.chars().count(), 260);
     }
 }
+
+#[cfg(test)]
+mod live {
+    /// Dumps the live RTSS shared memory; run with `cargo test rtss_live_dump -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn rtss_live_dump() {
+        use windows::core::w;
+        use windows::Win32::System::Memory::{MapViewOfFile, OpenFileMappingW, FILE_MAP_READ};
+        use windows::Win32::System::SystemInformation::GetTickCount;
+        unsafe {
+            let handle = OpenFileMappingW(FILE_MAP_READ.0, false, w!("RTSSSharedMemoryV2")).expect("mapping");
+            let view = MapViewOfFile(handle, FILE_MAP_READ, 0, 0, 0);
+            let p = view.Value.cast::<u8>();
+            let d = |o: usize| u32::from_le_bytes([*p.add(o), *p.add(o + 1), *p.add(o + 2), *p.add(o + 3)]);
+            println!("sig {:#x} ver {:#x} entry {} off {} count {} now {}", d(0), d(4), d(8), d(12), d(16), GetTickCount());
+            let (stride, start, count) = (d(8) as usize, d(12) as usize, d(16) as usize);
+            for i in 0..count {
+                let o = start + i * stride;
+                if d(o) == 0 { continue; }
+                let name: Vec<u8> = (0..260).map(|j| *p.add(o + 4 + j)).take_while(|b| *b != 0).collect();
+                println!("#{i} pid {} {} flags {:#x} t0 {} t1 {} frames {} frametime {}", d(o), String::from_utf8_lossy(&name), d(o + 264), d(o + 268), d(o + 272), d(o + 276), d(o + 280));
+            }
+            println!("read_fps(None) = {:?}", super::read_fps(None));
+        }
+    }
+}

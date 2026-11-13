@@ -139,3 +139,13 @@ mod tests {
         assert!(parse(&fixture(&[])).is_none());
     }
 }
+
+#[cfg(test)]
+mod live {
+    /// Reads the running Afterburner; `cargo test afterburner_live -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn afterburner_live() {
+        println!("cpu temp = {:?}", super::read_cpu_temp());
+    }
+}
