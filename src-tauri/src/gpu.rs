@@ -2,8 +2,12 @@
 
 use serde::Serialize;
 
-/// Metrics a GPU key can show, in the order a key press cycles through them.
-pub const METRICS: &[&str] = &["fps", "load", "temp", "vram", "power", "clock", "fan"];
+/// GPU metrics, in the order a key press cycles through them.
+pub const GPU_METRICS: &[&str] = &["fps", "load", "temp", "vram", "power", "clock", "fan"];
+/// CPU / memory metrics, cycled the same way (a press stays inside the key's group).
+pub const CPU_METRICS: &[&str] = &["cpu", "cputemp", "ram"];
+/// Every metric a monitor key can show (config validation).
+pub const METRICS: &[&str] = &["fps", "load", "temp", "vram", "power", "clock", "fan", "cpu", "cputemp", "ram"];
 
 /// One sample of everything the monitor reads. Units: %, °C, MiB, W, MHz.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -24,6 +28,12 @@ pub struct GpuStats {
     pub fps_app: Option<String>,
     /// why NVML gave nothing (no NVIDIA driver, …)
     pub error: Option<String>,
+    /// total CPU load in %
+    pub cpu: Option<f32>,
+    /// CPU temperature in °C from MSI Afterburner; None when Afterburner does not run or monitor it
+    pub cpu_temp: Option<f32>,
+    pub ram_used: Option<f32>,
+    pub ram_total: Option<f32>,
 }
 
 /// Set by the engine while a GPU key is on the deck; the poller sleeps otherwise.

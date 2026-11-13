@@ -20,3 +20,4 @@ pub mod i18n;
 pub mod sound;
 pub mod gpu;
 pub mod rtss;
+pub mod afterburner;
