@@ -21,6 +21,7 @@ export function plural(n, one, many, csOne, csFew, csMany) {
 }
 
 const CS = {
+  "Play while held": "Hrát, dokud držím",
   "Sound (soundboard)": "Zvuk (soundboard)",
   "Sound: {0}": "Zvuk: {0}",
   "Sound (no file)": "Zvuk (bez souboru)",

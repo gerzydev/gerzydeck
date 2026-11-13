@@ -135,6 +135,7 @@ function fillTile(btn, cfg, k) {
   btn.style.setProperty('--key-bg', cfg.bg);
   btn.title = `${k}: ${actionSummary(cfg.action)}`;
   btn.classList.toggle('has-img', Boolean(cfg.image));
+  btn.classList.toggle('sound-playing', cfg.action?.type === 'sound' && cfg.action.mode !== 'stopAll' && (state.playingSounds ?? []).includes(cfg.action.sound));
   if (cfg.image) {
     const img = h('img', { alt: '' });
     imageUrl(cfg.image).then((u) => { if (u) img.src = u; });
@@ -431,8 +432,8 @@ function actionFields(cfg, changed, redraw, k) {
       return pluginActionFields(ui, activeProfile().id, k, cfg, (rerender) => { save(); if (rerender) renderDeck(); else changed(); });
     case 'sound': {
       const mode = h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Playback mode")),
-        h('select', { class: 'rm-select', onchange: (e) => { a.mode = e.target.value; changed(); redraw(); } },
-          [['toggle', t("Play / stop")], ['restart', t("Restart from beginning")], ['stopAll', t("Stop all sounds")]].map(([v, l]) => option(v, l, a.mode))));
+        h('select', { class: 'rm-select', onchange: (e) => { a.mode = e.target.value; if (a.mode === 'stopAll') { a.sound = ''; a.name = ''; } changed(); redraw(); } },
+          [['toggle', t("Play / stop")], ['restart', t("Restart from beginning")], ['stopAll', t("Stop all sounds")], ['hold', t("Play while held")]].map(([v, l]) => option(v, l, a.mode))));
       if (a.mode === 'stopAll') return [mode];
       let busy = false;
       const input = h('input', { type: 'file', accept: '.mp3,.wav,.ogg,.flac', hidden: true,
@@ -804,7 +805,7 @@ function onState(s) {
   renderBanners();
   if (!config) return;
   if (page === 'deck') {
-    for (let k = 1; k <= 15; k++) if (keyCfg(k).action?.type === 'usage') refreshTile(k);
+    for (let k = 1; k <= 15; k++) if (['usage', 'sound'].includes(keyCfg(k).action?.type)) refreshTile(k);
   }
   renderProfileSelect();
   if (profileChanged && page !== 'settings') renderPage();

@@ -30,6 +30,7 @@ pub trait EventSink: Send + 'static {
 #[serde(rename_all = "camelCase")]
 pub struct State {
     pub connected: bool,
+    pub playing_sounds: std::collections::BTreeSet<String>,
     pub active_profile_id: String,
     pub manual_profile_id: String,
     pub active_profile_name: String,
@@ -112,6 +113,7 @@ pub enum Msg {
     /// which usage providers have a key on the active profile
     UsageWanted(Sender<Vec<String>>),
     Plugin(PluginEvent),
+    SoundPlaying { sound: String, playing: bool },
     /// drag & drop in the editor: swap two keys of a profile (content, action, plugin settings)
     SwapKeys { profile_id: String, a: u8, b: u8, reply: Sender<Result<Config, String>> },
     /// property inspector for a key: forwarded to the host with the key's current action instance
@@ -178,6 +180,7 @@ struct Engine {
     render_usage: fn(&UsageTile) -> Vec<u8>,
     usage_wake: Option<Sender<()>>,
     sound_tx: Option<Sender<crate::sound::SoundCmd>>,
+    held_sounds: HashMap<u8, String>,
     usage: HashMap<String, Result<crate::usage::Usage, String>>,
     host_tx: Option<Sender<HostCmd>>,
     /// action instances the host was told are visible (context → instance)
@@ -220,6 +223,7 @@ impl Engine {
             render_usage: d.render_usage,
             usage_wake: d.usage_wake,
             sound_tx: d.sound_tx,
+            held_sounds: HashMap::new(),
             usage: HashMap::new(),
             host_tx: d.host_tx,
             visible: HashMap::new(),
@@ -251,7 +255,7 @@ impl Engine {
         let cmd = match mode.as_str() {
             "stopAll" => SoundCmd::StopAll,
             _ if sound.is_empty() => return,
-            m => SoundCmd::Press { sound: sound.clone(), me: *me, mic: *mic, mode: if m == "restart" { Mode::Restart } else { Mode::Toggle } },
+            m => SoundCmd::Press { sound: sound.clone(), me: *me, mic: *mic, mode: match m { "restart" => Mode::Restart, "hold" => Mode::Hold, _ => Mode::Toggle } },
         };
         let _ = tx.send(cmd);
     }
@@ -399,6 +403,7 @@ impl Engine {
                 }
                 continue;
             }
+            let sound_playing = matches!(&cfg.action, Action::Sound { sound, mode, .. } if mode != "stopAll" && self.state.playing_sounds.contains(sound));
             let sig = match &plugin {
                 Some((p, state)) => format!(
                     "P|{}|{:?}|{}|{}|{}|{:?}|{}|{:?}",
@@ -411,7 +416,7 @@ impl Engine {
                     self.missing_plugins.contains(p),
                     cfg.title_align
                 ),
-                None => format!("{:?}|{}|{}", cfg.image, cfg.label, cfg.bg),
+                None => format!("{:?}|{}|{}|{}", cfg.image, cfg.label, cfg.bg, sound_playing),
             };
             if self.rendered.get(&k) == Some(&sig) {
                 continue;
@@ -442,6 +447,7 @@ impl Engine {
                 }
                 None => {
                     let spec = KeySpec {
+                        playing: sound_playing,
                         image: cfg.image.as_deref().and_then(|id| self.store.read_image(id)),
                         label: cfg.label.clone(),
                         bg: parse_hex(&cfg.bg),
@@ -606,8 +612,23 @@ impl Engine {
         }
     }
 
+    fn release_sound(&mut self, key: u8) {
+        if let Some(sound) = self.held_sounds.remove(&key) {
+            if let Some(tx) = &self.sound_tx {
+                let _ = tx.send(crate::sound::SoundCmd::Stop { sound });
+            }
+        }
+    }
+
+    fn release_sounds(&mut self) {
+        let keys: Vec<_> = self.held_sounds.keys().copied().collect();
+        for key in keys { self.release_sound(key); }
+    }
+
     fn on_key(&mut self, key: u8, pressed: bool) {
         self.sink.key(key, pressed);
+        // Release the sound captured at key-down, even after a profile/action change.
+        if !pressed { self.release_sound(key); self.runner.release(key); }
         if self.state.calibrating {
             return;
         }
@@ -624,6 +645,10 @@ impl Engine {
                 }
             }
             if matches!(action, Action::Sound { .. }) {
+                if self.held_sounds.contains_key(&key) { return; }
+                if let Action::Sound { sound, mode, .. } = &action {
+                    if mode == "hold" && !sound.is_empty() { self.held_sounds.insert(key, sound.clone()); }
+                }
                 self.play_sound(&action);
             }
             let _ = self.runner.press(key, &action);
@@ -631,8 +656,6 @@ impl Engine {
             for id in switches {
                 self.switch(id);
             }
-        } else {
-            self.runner.release(key);
         }
     }
 
@@ -748,6 +771,7 @@ impl Engine {
             Msg::Device(DeviceEvent::Disconnected) => {
                 log::info!("deck disconnected");
                 self.runner.release_all();
+                self.release_sounds();
                 self.state.connected = false;
                 self.emit_state();
                 self.sync_visible();
@@ -761,6 +785,13 @@ impl Engine {
             }
             Msg::Device(DeviceEvent::Key { key, pressed }) => self.on_key(key, pressed),
             Msg::Plugin(ev) => self.on_plugin(ev),
+            Msg::SoundPlaying { sound, playing } => {
+                let changed = if playing { self.state.playing_sounds.insert(sound) } else { self.state.playing_sounds.remove(&sound) };
+                if changed {
+                    self.sink.state(&self.state);
+                    self.render_active();
+                }
+            }
             Msg::SwapKeys { profile_id, a, b, reply } => {
                 let res = self.swap_keys(&profile_id, a, b);
                 let ok = res.is_ok();
@@ -842,6 +873,7 @@ impl Engine {
                 self.state.calibrating = on;
                 if on {
                     self.runner.release_all();
+                    self.release_sounds();
                 }
                 self.emit_state();
             }
@@ -853,6 +885,8 @@ impl Engine {
             }
             Msg::Shutdown => {
                 self.runner.release_all();
+                self.release_sounds();
+                if let Some(tx) = &self.sound_tx { let _ = tx.send(crate::sound::SoundCmd::StopAll); }
                 self.host(HostCmd::Shutdown);
                 let _ = self.device_tx.send(DeviceCmd::Stop);
                 return false;
@@ -1177,5 +1211,147 @@ mod tests {
         t.send(Msg::ImportImage(png, r));
         let id = rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
         assert!(t.store.read_image(&id).is_some());
+    }
+}
+
+#[cfg(test)]
+mod sound_tests {
+    use super::*;
+    use crate::sound::{Mode, SoundCmd};
+    use std::sync::mpsc::Receiver;
+    use serde_json::json;
+
+    const A: &str = "0123456789abcdef.wav";
+    const B: &str = "fedcba9876543210.mp3";
+    struct Kb;
+    impl Keyboard for Kb {
+        fn down(&self, _: &str) {}
+        fn up(&self, _: &str) {}
+        fn tap_vk(&self, _: u16) {}
+        fn type_text(&self, _: &str) {}
+    }
+    struct Sink(Arc<Mutex<Vec<State>>>);
+    impl EventSink for Sink {
+        fn state(&self, s: &State) { self.0.lock().unwrap().push(s.clone()); }
+        fn config(&self, _: &Config) {}
+        fn key(&self, _: u8, _: bool) {}
+        fn raw(&self, _: u8, _: bool) {}
+    }
+    fn action(sound: &str, mode: &str) -> Action {
+        Action::Sound { sound: sound.into(), name: "boom.wav".into(), me: 63, mic: 29, mode: mode.into() }
+    }
+    struct Rig {
+        e: Engine,
+        sounds: Receiver<SoundCmd>,
+        dev: Receiver<DeviceCmd>,
+        states: Arc<Mutex<Vec<State>>>,
+    }
+    impl Rig {
+        fn new() -> Self {
+            let store = Store::new(std::env::temp_dir().join(format!("deck-sound-{}", crate::config::new_id())));
+            let cfg = normalize_config(&json!({
+                "defaultProfileId":"A", "activeProfileId":"A",
+                "profiles":[{"id":"A","name":"A","keys":{}},{"id":"B","name":"B","keys":{}}]
+            }));
+            store.save(&cfg).unwrap();
+            let (stx, sounds) = channel();
+            let (dtx, dev) = channel();
+            let states = Arc::new(Mutex::new(Vec::new()));
+            let e = Engine::new(EngineDeps {
+                store, device_tx: dtx, keyboard: Arc::new(Kb),
+                launch: Arc::new(|_, _| {}), system: Arc::new(|_| {}),
+                sink: Box::new(Sink(states.clone())),
+                render: |s| vec![u8::from(s.playing)], render_plugin: |_| vec![], render_usage: |_| vec![],
+                usage_wake: None, host_tx: None, sound_tx: Some(stx),
+            });
+            assert_eq!(sounds.try_recv().unwrap(), SoundCmd::SetDevices { me: "".into(), mic: "auto".into() });
+            while dev.try_recv().is_ok() {}
+            Self { e, sounds, dev, states }
+        }
+        fn set(&mut self, key: u8, a: Action) { self.e.config.profiles[0].keys.get_mut(&key.to_string()).unwrap().action = a; }
+        fn commands(&self) -> Vec<SoundCmd> { self.sounds.try_iter().collect() }
+        fn images(&self) -> Vec<(u8, Vec<u8>)> {
+            self.dev.try_iter().flat_map(|c| match c { DeviceCmd::SetImages(v) => v, _ => vec![] }).collect()
+        }
+    }
+    #[test]
+    fn sound_press_modes_volumes_stop_all_and_empty() {
+        let mut r = Rig::new();
+        for (mode, expected) in [("toggle", Mode::Toggle), ("restart", Mode::Restart), ("hold", Mode::Hold)] {
+            r.set(1, action(A, mode));
+            r.e.on_key(1, true);
+            assert_eq!(r.commands(), vec![SoundCmd::Press { sound: A.into(), me: 63, mic: 29, mode: expected }]);
+            r.e.on_key(1, false);
+            assert_eq!(r.commands(), if mode == "hold" { vec![SoundCmd::Stop { sound: A.into() }] } else { vec![] });
+        }
+        r.set(1, action("", "toggle"));
+        r.e.on_key(1, true);
+        assert!(r.commands().is_empty());
+        r.set(1, action("", "stopAll"));
+        r.e.on_key(1, true);
+        assert_eq!(r.commands(), vec![SoundCmd::StopAll]);
+    }
+    #[test]
+    fn hold_release_uses_original_sound_across_profile_and_action_changes() {
+        let mut r = Rig::new();
+        r.set(1, action(A, "hold"));
+        // A plugin on the new profile must not intercept release of the original sound.
+        r.e.config.profiles[1].keys.get_mut("1").unwrap().action = Action::Plugin {
+            plugin: "com.x".into(), action: "com.x.act".into(), settings: json!({}), state: 0
+        };
+        r.e.on_key(1, true);
+        r.e.on_key(1, true); // duplicate key-down does not restart a held sound
+        assert_eq!(r.commands().len(), 1);
+        r.set(1, action(B, "hold"));
+        r.e.set_active("B".into());
+        r.e.on_key(1, false);
+        assert_eq!(r.commands(), vec![SoundCmd::Stop { sound: A.into() }]);
+        r.e.on_key(1, false);
+        assert!(r.commands().is_empty());
+    }
+    #[test]
+    fn disconnect_calibration_and_shutdown_release_held_sounds() {
+        for msg in [Msg::Device(DeviceEvent::Disconnected), Msg::SetCalibrating(true), Msg::Shutdown] {
+            let mut r = Rig::new();
+            r.set(1, action(A, "hold"));
+            r.e.on_key(1, true);
+            r.commands();
+            r.e.handle(msg);
+            assert!(r.commands().contains(&SoundCmd::Stop { sound: A.into() }));
+            assert!(r.e.held_sounds.is_empty());
+        }
+    }
+    #[test]
+    fn output_changes_send_devices_only_when_changed() {
+        let mut r = Rig::new();
+        let mut raw = serde_json::to_value(&r.e.config).unwrap();
+        r.e.set_config(&raw).unwrap();
+        assert!(r.commands().is_empty());
+        raw["soundMeDevice"] = json!("Headphones");
+        r.e.set_config(&raw).unwrap();
+        assert_eq!(r.commands(), vec![SoundCmd::SetDevices { me: "Headphones".into(), mic: "auto".into() }]);
+        raw["soundMicDevice"] = json!("CABLE Input");
+        r.e.set_config(&raw).unwrap();
+        assert_eq!(r.commands(), vec![SoundCmd::SetDevices { me: "Headphones".into(), mic: "CABLE Input".into() }]);
+        r.e.set_config(&raw).unwrap();
+        assert!(r.commands().is_empty());
+    }
+    #[test]
+    fn playing_events_update_state_and_only_matching_tiles() {
+        let mut r = Rig::new();
+        r.set(1, action(A, "toggle"));
+        r.set(2, action(A, "hold"));
+        r.set(3, action(B, "restart"));
+        r.set(4, action(A, "stopAll"));
+        r.e.handle(Msg::Device(DeviceEvent::Connected));
+        r.images();
+        r.e.handle(Msg::SoundPlaying { sound: A.into(), playing: true });
+        assert_eq!(r.images(), vec![(1, vec![1]), (2, vec![1])]);
+        assert!(r.states.lock().unwrap().last().unwrap().playing_sounds.contains(A));
+        r.e.handle(Msg::SoundPlaying { sound: A.into(), playing: true });
+        assert!(r.images().is_empty());
+        r.e.handle(Msg::SoundPlaying { sound: A.into(), playing: false });
+        assert_eq!(r.images(), vec![(1, vec![0]), (2, vec![0])]);
+        assert!(!r.states.lock().unwrap().last().unwrap().playing_sounds.contains(A));
     }
 }

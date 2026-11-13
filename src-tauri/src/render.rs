@@ -32,6 +32,7 @@ impl std::error::Error for RenderError {}
 
 #[derive(Debug, Clone, Default)]
 pub struct KeySpec {
+    pub playing: bool,
     pub image: Option<Vec<u8>>,
     pub label: String,
     pub bg: [u8; 3],
@@ -182,6 +183,16 @@ pub fn render_key_jpeg(spec: &KeySpec) -> Vec<u8> {
     }
     if !spec.label.is_empty() {
         draw_label(&mut canvas, &spec.label, has_image);
+    }
+    if spec.playing {
+        // Three pixel frame inside the 104 px tile, clear of the rounded corners.
+        for y in 4..KEY_SIZE - 4 {
+            for x in 4..KEY_SIZE - 4 {
+                if !(7..KEY_SIZE - 7).contains(&x) || !(7..KEY_SIZE - 7).contains(&y) {
+                    canvas.put_pixel(x, y, Rgb([0xff, 0x9a, 0x3c]));
+                }
+            }
+        }
     }
     round_corners(&mut canvas, CORNER_RADIUS);
     encode_tile(&canvas)
@@ -373,8 +384,19 @@ mod tests {
     }
 
     #[test]
+    fn sound_playing_frame_is_visible_inside_tile() {
+        let spec = KeySpec { playing: true, bg: [20, 22, 24], ..KeySpec::default() };
+        let tile = imageops::rotate180(&image::load_from_memory(&render_key_jpeg(&spec)).unwrap().to_rgb8());
+        // JPEG is lossy: check the accent color with tolerance in the frame's middle.
+        let p = tile.get_pixel(5, KEY_SIZE / 2);
+        assert!(p[0] > 200 && p[1] > 100 && p[1] < 200 && p[2] < 110, "{p:?}");
+        let center = tile.get_pixel(KEY_SIZE / 2, KEY_SIZE / 2);
+        assert!(center[0] < 50);
+    }
+
+    #[test]
     fn rendered_key_is_device_safe() {
-        let j = render_key_jpeg(&KeySpec { image: None, label: "Fireball".into(), bg: [0x33, 0x66, 0x99] });
+        let j = render_key_jpeg(&KeySpec { playing: false, image: None, label: "Fireball".into(), bg: [0x33, 0x66, 0x99] });
         let m = jpeg_markers(&j);
         assert_eq!(m[0], 0xD8);
         assert_eq!(m[1], 0xE0);
@@ -397,7 +419,7 @@ mod tests {
                 src.put_pixel(x, y, Rgb([255, 0, 0]));
             }
         }
-        let j = render_key_jpeg(&KeySpec { image: Some(png_of(&src.into())), label: String::new(), bg: [0, 0, 0] });
+        let j = render_key_jpeg(&KeySpec { playing: false, image: Some(png_of(&src.into())), label: String::new(), bg: [0, 0, 0] });
         let out = image::load_from_memory(&j).unwrap().to_rgb8();
         assert!(out.get_pixel(50, 90)[0] > 200);
         assert!(out.get_pixel(50, 10)[0] < 50);
@@ -422,7 +444,7 @@ mod tests {
 
     #[test]
     fn broken_image_falls_back_to_bg_and_label() {
-        let j = render_key_jpeg(&KeySpec { image: Some(b"not an image".to_vec()), label: "X".into(), bg: [10, 20, 30] });
+        let j = render_key_jpeg(&KeySpec { playing: false, image: Some(b"not an image".to_vec()), label: "X".into(), bg: [10, 20, 30] });
         assert!(image::load_from_memory(&j).is_ok());
     }
 
@@ -451,7 +473,7 @@ mod tests {
     #[test]
     fn tile_has_rounded_black_corners() {
         let white = image::RgbImage::from_pixel(200, 200, Rgb([255, 255, 255]));
-        let j = render_key_jpeg(&KeySpec { image: Some(png_of(&white.into())), label: String::new(), bg: [255, 255, 255] });
+        let j = render_key_jpeg(&KeySpec { playing: false, image: Some(png_of(&white.into())), label: String::new(), bg: [255, 255, 255] });
         let out = image::load_from_memory(&j).unwrap().to_rgb8();
         for (x, y) in [(0, 0), (103, 0), (0, 103), (103, 103), (2, 2)] {
             assert!(out.get_pixel(x, y)[0] < 40, "corner ({x},{y}) not black: {:?}", out.get_pixel(x, y));
@@ -464,7 +486,7 @@ mod tests {
     /// Chroma subsampling would make coloured edges blocky at 100×100 (guard; the image encoder is 4:4:4).
     #[test]
     fn key_jpeg_has_full_chroma_resolution() {
-        let j = render_key_jpeg(&KeySpec { image: None, label: "Ab".into(), bg: [0x33, 0x66, 0x99] });
+        let j = render_key_jpeg(&KeySpec { playing: false, image: None, label: "Ab".into(), bg: [0x33, 0x66, 0x99] });
         let sof = j.windows(2).position(|w| w == [0xFF, 0xC0]).expect("SOF0") + 2;
         let ncomp = j[sof + 7] as usize;
         assert_eq!(ncomp, 3);
@@ -521,9 +543,9 @@ mod preview {
         image::DynamicImage::from(purple).write_to(&mut Cursor::new(&mut png), ImageFormat::Png).unwrap();
         let extra = std::env::var("DECK_PREVIEW_IMAGE").ok().and_then(|p| std::fs::read(p).ok());
         let specs = [
-            KeySpec { image: None, label: "Fireball".into(), bg: [0x33, 0x66, 0x99] },
-            KeySpec { image: Some(png), label: "Ohnivá koule".into(), bg: DEFAULT_BG },
-            KeySpec { image: extra, label: String::new(), bg: DEFAULT_BG },
+            KeySpec { playing: false, image: None, label: "Fireball".into(), bg: [0x33, 0x66, 0x99] },
+            KeySpec { playing: false, image: Some(png), label: "Ohnivá koule".into(), bg: DEFAULT_BG },
+            KeySpec { playing: false, image: extra, label: String::new(), bg: DEFAULT_BG },
         ];
         let mut sheet = RgbImage::from_pixel(340, 100, Rgb([255, 255, 255]));
         for (i, s) in specs.iter().enumerate() {

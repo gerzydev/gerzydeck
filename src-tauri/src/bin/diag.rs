@@ -49,7 +49,7 @@ fn main() {
                     (1..=15u8)
                         .map(|k| {
                             let bg = match k { 1..=5 => [0x1f, 0x5f, 0x3a], 6..=10 => [0x1f, 0x3a, 0x5f], _ => [0x5f, 0x1f, 0x3a] };
-                            (k, render_key_jpeg(&KeySpec { image: None, label: k.to_string(), bg }))
+                            (k, render_key_jpeg(&KeySpec { playing: false, image: None, label: k.to_string(), bg }))
                         })
                         .collect()
                 };

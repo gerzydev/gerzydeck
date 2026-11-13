@@ -228,4 +228,28 @@ mod tests {
         assert!(s.read_image(&keep).is_some());
         assert_eq!(s.read_image(&drop), None);
     }
+    #[test]
+    fn sounds_prune_unused_ids_and_preserve_other_files() {
+        let dir = tmp();
+        let store = Store::new(dir.clone());
+        let sounds = crate::sound::sounds_dir(&dir);
+        std::fs::create_dir_all(&sounds).unwrap();
+        let keep = "0123456789abcdef.wav";
+        let unused = "fedcba9876543210.mp3";
+        for name in [keep, unused, "notes.txt", "other.wav", "0123456789abcdef.png"] {
+            std::fs::write(sounds.join(name), b"file").unwrap();
+        }
+        let mut cfg = store.load();
+        cfg.profiles[0].keys.get_mut("1").unwrap().action = crate::config::Action::Sound {
+            sound: keep.into(), name: "test.wav".into(), me: 80, mic: 80, mode: "hold".into()
+        };
+        store.prune_sounds(&cfg);
+        assert!(sounds.join(keep).is_file());
+        assert!(!sounds.join(unused).exists());
+        for name in ["notes.txt", "other.wav", "0123456789abcdef.png"] {
+            assert!(sounds.join(name).is_file());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
 }

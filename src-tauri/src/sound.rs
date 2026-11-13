@@ -6,9 +6,9 @@
 //! Playback runs on its own thread: rodio's output streams are not `Send`.
 
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 
 pub const MAX_SOUND_BYTES: usize = 50 * 1024 * 1024;
 const EXTS: [&str; 4] = ["mp3", "wav", "ogg", "flac"];
@@ -67,6 +67,7 @@ pub fn import(data_dir: &Path, bytes: &[u8]) -> Result<String, String> {
 pub enum SoundCmd {
     /// a deck key (or the editor's test button) asks for a sound; volumes 0–100
     Press { sound: String, me: u8, mic: u8, mode: Mode },
+    Stop { sound: String },
     StopAll,
     /// `me`: "" = Windows default output, else a device name.
     /// `mic`: "auto" = first virtual microphone found, "none" = off, else a device name.
@@ -79,6 +80,8 @@ pub enum Mode {
     Toggle,
     /// every press starts it again from the beginning
     Restart,
+    /// plays until the key is released
+    Hold,
 }
 
 /// One playing copy of a sound on one output; dropping it stops it.
@@ -102,20 +105,32 @@ pub struct Player<B: Backend> {
     backend: B,
     dir: PathBuf,
     playing: HashMap<String, Vec<Box<dyn Voice>>>,
+    reported: HashSet<String>,
 }
 
 impl<B: Backend> Player<B> {
     pub fn new(backend: B, dir: PathBuf) -> Self {
-        Self { backend, dir, playing: HashMap::new() }
+        Self { backend, dir, playing: HashMap::new(), reported: HashSet::new() }
     }
 
     pub fn is_playing(&self, sound: &str) -> bool {
         self.playing.get(sound).is_some_and(|v| v.iter().any(|x| !x.done()))
     }
 
+    /// Reap ended voices and report transitions; a sound finishes after both outputs finish.
+    pub fn poll(&mut self) -> Vec<(String, bool)> {
+        self.playing.retain(|_, v| v.iter().any(|x| !x.done()));
+        let current: HashSet<String> = self.playing.keys().cloned().collect();
+        let mut events: Vec<_> = self.reported.difference(&current).map(|s| (s.clone(), false)).collect();
+        events.extend(current.difference(&self.reported).map(|s| (s.clone(), true)));
+        self.reported = current;
+        events
+    }
+
     pub fn handle(&mut self, cmd: SoundCmd) {
         self.playing.retain(|_, v| v.iter().any(|x| !x.done()));
         match cmd {
+            SoundCmd::Stop { sound } => { self.playing.remove(&sound); }
             SoundCmd::StopAll => self.playing.clear(),
             SoundCmd::SetDevices { me, mic } => {
                 self.playing.clear();
@@ -245,15 +260,29 @@ impl Backend for Rodio {
     }
 }
 
+/// Poll while audio is active so natural completion reaches the engine without another command.
+fn run_player<B: Backend>(player: &mut Player<B>, rx: Receiver<SoundCmd>, report: &mut impl FnMut(String, bool)) {
+    loop {
+        let received = if player.playing.is_empty() { rx.recv().map_err(|_| RecvTimeoutError::Disconnected) }
+            else { rx.recv_timeout(std::time::Duration::from_millis(100)) };
+        match received {
+            Ok(cmd) => player.handle(cmd),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+        for (sound, playing) in player.poll() {
+            report(sound, playing);
+        }
+    }
+}
+
 /// Starts the playback thread.
-pub fn spawn_player(data_dir: &Path) -> Sender<SoundCmd> {
+pub fn spawn_player(data_dir: &Path, mut report: impl FnMut(String, bool) + Send + 'static) -> Sender<SoundCmd> {
     let (tx, rx): (Sender<SoundCmd>, Receiver<SoundCmd>) = channel();
     let dir = sounds_dir(data_dir);
     let _ = std::thread::Builder::new().name("sound".into()).spawn(move || {
         let mut player = Player::new(Rodio { mic_choice: "auto".into(), ..Rodio::default() }, dir);
-        while let Ok(cmd) = rx.recv() {
-            player.handle(cmd);
-        }
+        run_player(&mut player, rx, &mut report);
     });
     tx
 }
@@ -421,4 +450,65 @@ mod tests {
         assert!(auto_mic(&names[..2]).unwrap().contains("CABLE"));
         assert_eq!(auto_mic(&names[..1]), None);
     }
+    #[test]
+    fn hold_and_stop_report_transitions() {
+        let (mut p, log) = player();
+        p.handle(press(Mode::Hold));
+        assert_eq!(p.poll(), vec![(A.into(), true)]);
+        assert!(p.poll().is_empty());
+        p.handle(SoundCmd::Stop { sound: "fedcba9876543210.mp3".into() });
+        assert!(p.poll().is_empty());
+        assert!(p.is_playing(A));
+        p.handle(SoundCmd::Stop { sound: A.into() });
+        assert_eq!(p.poll(), vec![(A.into(), false)]);
+        assert!(!*log.borrow().live[0].borrow());
+    }
+
+    #[test]
+    fn completion_waits_for_all_output_voices() {
+        let (mut p, log) = player();
+        p.handle(press(Mode::Hold));
+        let second = Rc::new(RefCell::new(true));
+        p.playing.get_mut(A).unwrap().push(Box::new(FakeVoice(second.clone())));
+        assert_eq!(p.poll(), vec![(A.into(), true)]);
+        *log.borrow().live[0].borrow_mut() = false;
+        assert!(p.poll().is_empty(), "microphone still playing");
+        *second.borrow_mut() = false;
+        assert_eq!(p.poll(), vec![(A.into(), false)]);
+        assert!(p.playing.is_empty());
+        assert!(p.poll().is_empty());
+    }
+
+    #[test]
+    fn reports_stop_all_device_change_and_restart() {
+        let (mut p, _) = player();
+        for stop in [SoundCmd::StopAll, SoundCmd::SetDevices { me: "".into(), mic: "none".into() }] {
+            p.handle(press(Mode::Restart));
+            assert_eq!(p.poll(), vec![(A.into(), true)]);
+            p.handle(press(Mode::Restart));
+            assert!(p.poll().is_empty(), "restart keeps the sound active");
+            p.handle(stop);
+            assert_eq!(p.poll(), vec![(A.into(), false)]);
+        }
+    }
+
+    #[test]
+    fn playback_loop_reports_natural_completion_without_another_command() {
+        let (mut p, log) = player();
+        let (tx, rx) = channel();
+        tx.send(press(Mode::Hold)).unwrap();
+        let mut sender = Some(tx);
+        let mut events = Vec::new();
+        run_player(&mut p, rx, &mut |sound, playing| {
+            events.push((sound, playing));
+            if playing {
+                *log.borrow().live[0].borrow_mut() = false;
+            } else {
+                // End the loop only after its periodic poll noticed completion.
+                sender.take();
+            }
+        });
+        assert_eq!(events, vec![(A.into(), true), (A.into(), false)]);
+    }
+
 }

@@ -156,7 +156,12 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     let (dev_events_tx, dev_events_rx) = channel();
     let (device_tx, device_handle) = spawn_device(HidApiBackend::default(), DeckOptions::default(), dev_events_tx);
     let (usage_wake_tx, usage_wake_rx) = channel();
-    let sound_tx = gerzys_deck::sound::spawn_player(&dir);
+    let sound_slot = engine_slot.clone();
+    let sound_tx = gerzys_deck::sound::spawn_player(&dir, move |sound, playing| {
+        if let Some(tx) = sound_slot.lock().unwrap().as_ref() {
+            let _ = tx.send(Msg::SoundPlaying { sound, playing });
+        }
+    });
     let (engine_tx, engine_handle) = spawn_engine(EngineDeps {
         store,
         device_tx,

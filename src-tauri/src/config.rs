@@ -83,7 +83,7 @@ pub enum Action {
     /// AI plan usage on the key: provider "claude" | "codex", window "session" (5 h) | "weekly"
     Usage { provider: String, window: String },
     /// Soundboard: `sound` is a stored sound id (empty for "stopAll"), `name` the original file name,
-    /// `me`/`mic` volumes 0–100, `mode` "toggle" | "restart" | "stopAll"
+    /// `me`/`mic` volumes 0–100, `mode` "toggle" | "restart" | "stopAll" | "hold"
     Sound { sound: String, name: String, me: u8, mic: u8, mode: String },
 }
 
@@ -236,7 +236,7 @@ pub fn normalize_action(v: &Value) -> Action {
             }
             "sound" => {
                 let mode = s(&v["mode"], 20);
-                if !matches!(mode.as_str(), "toggle" | "restart" | "stopAll") {
+                if !matches!(mode.as_str(), "toggle" | "restart" | "stopAll" | "hold") {
                     return None;
                 }
                 let sound = s(&v["sound"], 40);
@@ -382,6 +382,7 @@ mod tests {
         assert_eq!(ok, Action::Sound { sound: "0123456789abcdef.mp3".into(), name: "boom.mp3".into(), me: 100, mic: 40, mode: "toggle".into() });
         let fresh = normalize_action(&json!({ "type": "sound", "sound": "", "mode": "restart" }));
         assert_eq!(fresh, Action::Sound { sound: String::new(), name: String::new(), me: 80, mic: 80, mode: "restart".into() });
+        assert!(matches!(normalize_action(&json!({ "type": "sound", "sound": "0123456789abcdef.mp3", "mode": "hold" })), Action::Sound { mode, .. } if mode == "hold"));
         let stop = normalize_action(&json!({ "type": "sound", "sound": "0123456789abcdef.mp3", "mode": "stopAll" }));
         assert!(matches!(stop, Action::Sound { ref sound, .. } if sound.is_empty()));
         assert_eq!(normalize_action(&json!({ "type": "sound", "sound": "../../evil.mp3", "mode": "toggle" })), Action::None);

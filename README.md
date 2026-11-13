@@ -84,3 +84,9 @@ The source code is released under the [MIT License](LICENSE). The installer addi
 - Built with [Tauri](https://tauri.app).
 
 gerzyDECK is not affiliated with Fifine, Mirabox, Elgato/Corsair, Anthropic or OpenAI. All trademarks belong to their owners.
+
+## Soundboard
+
+Assign a Sound action to play MP3, WAV, OGG or FLAC files (up to 50 MB), with separate volumes for your headphones and the microphone. Choose play/stop, restart, play while held, or stop all sounds. Test previews play only to your own output.
+
+To send sound into a game or Discord, use a virtual microphone. SteelSeries Sonar's “Microphone” playback device works out of the box with Auto. Alternatively, install the free VB-Audio Virtual Cable or Voicemeeter, pick its playback device in Settings → Soundboard, and select the corresponding virtual microphone in your game or Discord. Turn off Discord/Krisp noise suppression if it filters the sound.
