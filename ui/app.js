@@ -616,7 +616,7 @@ function actionFields(cfg, changed, redraw, k) {
             h('optgroup', { label: t("Frames (PresentMon)") }, FRAME_METRICS.map(([v, label]) => option(v, label, a.metric))),
             h('optgroup', { label: t("Graphics (NVIDIA)") }, GPU_METRICS.map(([v, label]) => option(v, label, a.metric))),
             h('optgroup', { label: t("Processor and memory") }, CPU_METRICS.map(([v, label]) => option(v, label, a.metric))))),
-        FRAME_METRICS.some(([m]) => m === a.metric) && fpsPermissionPanel(),
+        ...(FRAME_METRICS.some(([m]) => m === a.metric) ? [fpsPermissionPanel()] : []),
         h('div', { class: 'rm-meta' }, t("FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to cycle metrics within its group.")),
       ];
     case 'usage':
