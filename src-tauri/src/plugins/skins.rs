@@ -22,15 +22,22 @@ fn base(image: &str) -> String {
 
 /// Key frame. `inner` is drawn on top; `color` tints the frame and its glow.
 pub fn frame_with(color: &str, inner: &str) -> String {
+    frame_layers(color, "", inner)
+}
+
+/// Key frame with a background layer (`under`, clipped to the key face) below the frame lines.
+fn frame_layers(color: &str, under: &str, inner: &str) -> String {
     format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
 <defs>
 <linearGradient id="k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22262a"/><stop offset="1" stop-color="#101214"/></linearGradient>
 <radialGradient id="l" cx="0.5" cy="0" r="0.8"><stop offset="0" stop-color="{color}" stop-opacity="0.22"/><stop offset="1" stop-color="{color}" stop-opacity="0"/></radialGradient>
 <filter id="g" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3"/></filter>
+<clipPath id="c"><rect x="8" y="8" width="128" height="128" rx="19"/></clipPath>
 </defs>
 <rect width="144" height="144" fill="url(#k)"/>
 <rect width="144" height="144" fill="url(#l)"/>
+<g clip-path="url(#c)">{under}</g>
 <rect x="7" y="7" width="130" height="130" rx="20" fill="none" stroke="{color}" stroke-opacity="0.45" stroke-width="5" filter="url(#g)"/>
 <rect x="7" y="7" width="130" height="130" rx="20" fill="none" stroke="{color}" stroke-width="2.5"/>
 <rect x="8.5" y="8.5" width="127" height="127" rx="18.5" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="1"/>
@@ -52,11 +59,11 @@ fn caption(text: &str, y: f32) -> String {
     format!(r##"<text x="72" y="{y}" text-anchor="middle" font-family="Segoe UI, DM Sans, sans-serif" font-size="14" font-weight="700" letter-spacing="2" fill="#8a9098">{text}</text>"##)
 }
 
-/// Big centred glyph, optional small caption under it.
-fn centred(g: &str, color: &str, cap: Option<&str>) -> String {
+/// Big centred glyph, optional small caption under it (the layer drawn inside the frame).
+fn centred_inner(g: &str, color: &str, cap: Option<&str>) -> String {
     match cap {
-        None => frame_with(color, &glyph(g, color, 42.0, 42.0, 2.5)),
-        Some(c) => frame_with(color, &format!("{}{}", glyph(g, color, 45.0, 30.0, 2.25), caption(c, 118.0))),
+        None => glyph(g, color, 42.0, 42.0, 2.5),
+        Some(c) => format!("{}{}", glyph(g, color, 45.0, 30.0, 2.25), caption(c, 118.0)),
     }
 }
 
@@ -78,7 +85,6 @@ const HANG_UP: &str = r#"<path d="M2.5 14.5c5.5-5 13.5-5 19 0l-2.2 3.2-3.8-1.6v-
 const MEGAPHONE: &str = r#"<path d="M3.5 9.5v5h3l7.5 5v-15l-7.5 5z"/><path d="M6.5 14.5l1 5h2.5l-1-4M17.5 8.5l2-2M18.5 12h3M17.5 15.5l2 2"/>"#;
 const BELL: &str = r#"<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 21a2 2 0 0 0 4 0"/>"#;
 const CHART: &str = r#"<path d="M5 20V11M10.5 20V5M16 20v-6M2.5 20.5h19"/>"#;
-const CHAT: &str = r#"<path d="M4 5.5h16a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5h-9l-5 4v-4H4A1.5 1.5 0 0 1 2.5 16V7A1.5 1.5 0 0 1 4 5.5z"/><path d="M8 11.5h.01M12 11.5h.01M16 11.5h.01"/>"#;
 const CPU: &str = r#"<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>"#;
 const RAM: &str = r#"<path d="M3 7h18a1 1 0 0 1 1 1v3a1.5 1.5 0 0 0 0 3v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-3a1.5 1.5 0 0 0 0-3V8a1 1 0 0 1 1-1z"/><path d="M7 11v3M12 11v3M17 11v3M6 18v3M10 18v3M14 18v3M18 18v3"/>"#;
 const CLOCK: &str = r#"<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>"#;
@@ -111,6 +117,13 @@ fn system_tile(action: &str, list: bool) -> Option<String> {
 // ---------- Discord (me.amankhanna.oadiscord) ----------
 // State 0 = idle (accent), state 1 = active: red when it cuts you off, green when you're live.
 // "_off" files (and headphonesAndMicrophone_1) are sent while Discord isn't connected / in a call.
+
+/// Discord logo (path data from Simple Icons, CC0; the logo is a trademark of Discord Inc.),
+/// large and faint in the lower left of the key face, tinted with the state colour.
+fn discord_logo(color: &str) -> String {
+    const CLYDE: &str = "M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z";
+    format!(r#"<path transform="translate(-16 50) scale(4.4)" d="{CLYDE}" fill="{color}" fill-opacity="0.13"/>"#)
+}
 
 fn discord_file(file: &str) -> Option<String> {
     let name = file.strip_prefix("actions/")?;
@@ -148,7 +161,7 @@ fn discord_file(file: &str) -> Option<String> {
         "serverStats" => (CHART, ACCENT, None),
         _ => return None,
     };
-    Some(centred(g, color, cap))
+    Some(frame_layers(color, &discord_logo(color), &centred_inner(g, color, cap)))
 }
 
 // ---------- Essentials for Spotify (com.ntanis.essentials-for-spotify) ----------
@@ -292,9 +305,12 @@ pub fn skin_svg(plugin: &str, action: &str, image: &str, list: bool) -> Option<S
 
 /// Category / plugin icon in the editor.
 pub fn plugin_icon_svg(plugin: &str) -> Option<String> {
+    if plugin == "me.amankhanna.oadiscord" {
+        let logo = discord_logo(ACCENT).replace(r#"transform="translate(-16 50) scale(4.4)""#, r#"transform="translate(34 36) scale(3.15)""#).replace(r#"fill-opacity="0.13""#, r#"fill-opacity="0.9""#);
+        return Some(frame_with(ACCENT, &logo));
+    }
     let g = match plugin {
         "me.amankhanna.oasystem" => PULSE,
-        "me.amankhanna.oadiscord" => CHAT,
         "com.ntanis.essentials-for-spotify" => MUSIC_BOX,
         _ => return None,
     };
