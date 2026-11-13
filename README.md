@@ -12,6 +12,7 @@ Unofficial Windows software for the **Fifine AmpliGame D6** (15 LCD keys), a rep
 - **Stream Deck plugins:** install straight from the app, from the OpenAction catalogue and the Elgato store archive (OBS, Spotify, Discord, PC metrics and hundreds more).
 - **Unified plugin look:** plugin keys match the app’s style and keep changing with plugin state; switch back globally or per key.
 - **Soundboard:** a key plays a sound to your headphones and into your microphone at once, so people in a game or on Discord hear it too.
+- **GPU monitor:** NVIDIA load, temperature, VRAM, power, core clock and fan speed via NVML, plus game FPS via RTSS; press the key to cycle metrics.
 - **AI usage:** keys showing your Claude and ChatGPT (Codex) plan limits and the time until they reset.
 - **Icons:** the Iconify catalogue (over 200,000 open-source icons), your own icon library and `.streamDeckIconPack` import.
 - **Boot logo:** your own 800 × 480 image shown when the deck is plugged in.
@@ -49,6 +50,12 @@ This is unofficial software and you use it **at your own risk**. The full terms 
 Assign a Sound action to play MP3, WAV, OGG or FLAC files (up to 50 MB), with separate volumes for your headphones and the microphone. Choose play/stop, restart, play while held, or stop all sounds. Test previews play only to your own output.
 
 To send sound into a game or Discord, use a virtual microphone. SteelSeries Sonar's “Microphone” playback device works out of the box with Auto. Alternatively, install the free VB-Audio Virtual Cable or Voicemeeter, pick its playback device in Settings → Soundboard, and select the corresponding virtual microphone in your game or Discord. Turn off Discord/Krisp noise suppression if it filters the sound.
+
+## GPU monitor
+
+Assign a **GPU monitor (NVIDIA)** action and choose the initial metric. NVIDIA readings use NVML from the installed NVIDIA driver. The key cycles through FPS, GPU load, temperature, VRAM, power, core clock and fan speed when pressed; unavailable readings show a dash.
+
+FPS requires **RivaTuner Statistics Server (RTSS)** running in the background. Its on-screen display (OSD) can stay off. Set **Application detection level** to something other than **None** for games you want to monitor. To exclude a game from RTSS, add its executable as a separate RTSS profile and set that profile's detection level to **None**.
 
 ## Development
 

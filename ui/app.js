@@ -13,11 +13,15 @@ const TEXT_NOTE = t("Typing text works in regular apps, games may ignore it.");
 
 const ACTION_TYPES = [
   ['none', t("None")], ['keys', t("Key / shortcut")], ['macro', t("Macro")], ['launch', t("Launch program / website")],
-  ['sound', t("Sound (soundboard)")], ['media', t("Media and volume")], ['system', t("System")], ['profile', t("Switch profile")], ['usage', t("AI usage (Claude, GPT)")], ['plugin', 'Plugin…'],
+  ['sound', t("Sound (soundboard)")], ['media', t("Media and volume")], ['system', t("System")], ['profile', t("Switch profile")], ['gpu', t("GPU monitor (NVIDIA)")], ['usage', t("AI usage (Claude, GPT)")], ['plugin', 'Plugin…'],
 ];
 const MEDIA = [['playpause', t("Play / pause")], ['next', t("Next track")], ['prev', t("Previous track")], ['mute', t("Mute")], ['volup', t("Volume +")], ['voldown', t("Volume −")]];
 const SYSTEM = [['lock', t("Lock PC")], ['sleep', t("Sleep PC")]];
 const USAGE_PROVIDERS = [['claude', t("Claude (login from Claude Code)")], ['codex', t("ChatGPT (login from Codex)")]];
+const GPU_METRICS = [
+  ['fps', 'FPS', 'FPS'], ['load', t("GPU load"), '%'], ['temp', t("GPU temperature"), '°C'],
+  ['vram', 'VRAM', 'MiB'], ['power', t("Power draw"), 'W'], ['clock', t("Core clock"), 'MHz'], ['fan', t("Fan speed"), '%'],
+];
 const USAGE_WINDOWS = [['session', t("5-hour window")], ['weekly', t("Weekly limit")]];
 const PROFILE_CYCLE = { __back: t("Previous profile"), __next: t("Next profile (cycle)"), __prev: t("Previous in order (cycle)") };
 const STEP_TYPES = [['tap', t("Tap")], ['down', t("Hold")], ['up', t("Release")], ['wait', t("Wait")], ['text', t("Type text")]];
@@ -116,6 +120,7 @@ function actionSummary(a) {
     case 'media': return MEDIA.find(([v]) => v === a.command)?.[1] ?? t("Media");
     case 'system': return SYSTEM.find(([v]) => v === a.command)?.[1] ?? t("System");
     case 'plugin': return pluginAction(a.plugin, a.action).action?.name ?? 'Plugin';
+    case 'gpu': return t("GPU: {0}", GPU_METRICS.find(([m]) => m === a.metric)?.[1] ?? 'FPS');
     case 'usage': return `${a.provider === 'claude' ? 'Claude' : 'GPT'} – ${a.window === 'weekly' ? t("week") : t("5h window")}`;
     case 'profile': return PROFILE_CYCLE[a.profileId] ?? t("Profile: {0}", config.profiles.find((p) => p.id === a.profileId)?.name ?? '?');
     default: return t("No action");
@@ -142,6 +147,10 @@ function fillTile(btn, cfg, k) {
     imageUrl(cfg.image).then((u) => { if (u) img.src = u; });
     btn.append(img);
     if (cfg.label) btn.append(h('span', { class: 'shade' }));
+  }
+  if (cfg.action?.type === 'gpu') {
+    btn.append(gpuPreview(cfg), h('span', { class: 'num' }, k));
+    return;
   }
   if (cfg.action?.type === 'usage') {
     btn.append(usagePreview(cfg));
@@ -183,6 +192,21 @@ function usagePreview(cfg) {
       h('span', { class: 'u-bar' }, h('span', { style: `width:${Math.min(100, Math.max(0, w.percent))}%;background:${color}` })),
       h('span', { class: 'u-reset' }, t("in {0}", resetText(w.resetsAt))));
   }
+  return box;
+}
+
+/** Latest GPU sample; null measurements remain visibly unavailable, never zero. */
+function gpuPreview(cfg) {
+  const [metric, caption, unit] = GPU_METRICS.find(([m]) => m === cfg.action.metric) ?? GPU_METRICS[0];
+  const gpu = state.gpu;
+  const number = (v) => Number.isFinite(v) ? Math.round(v).toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-US') : '–';
+  const value = metric === 'vram' ? gpu ? number(gpu.vramUsed) + ' / ' + number(gpu.vramTotal) : '–' : number(gpu?.[metric]);
+  const box = h('span', { class: 'usage-prev gpu-prev', title: gpu?.name || '' },
+    h('span', { class: 'u-name' }, cfg.label || caption),
+    h('span', { class: metric === 'vram' ? 'gpu-value is-wide' : 'gpu-value' }, value),
+    h('span', { class: 'gpu-unit' }, unit));
+  if (gpu?.error) box.append(h('span', { class: 'u-msg' }, gpu.error));
+  else if (metric === 'fps' && gpu?.fpsApp) box.append(h('span', { class: 'u-reset gpu-app', title: gpu.fpsApp }, gpu.fpsApp));
   return box;
 }
 
@@ -375,9 +399,10 @@ const ACTION_ICONS = {
   system: '<path d="M12 3v8"/><path d="M6.3 6.6a8 8 0 1 0 11.4 0"/>',
   profile: '<path d="M7 7h12l-3-3"/><path d="M17 17H5l3 3"/>',
   plugin: '<path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/>',
+  gpu: '<rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="12" cy="12" r="4"/><path d="M12 8v8M8 12h8M8 2v3M16 2v3M8 19v3M16 19v3M1 9h3M1 15h3M20 9h3M20 15h3"/>',
   usage: '<path d="M4 15a8 8 0 0 1 16 0"/><path d="M12 15l4-5"/><path d="M4 19h16"/>',
 };
-const ACTION_SHORT = { none: t("None"), keys: t("Key"), macro: t("Macro"), launch: t("Launch"), sound: t("Sound"), media: t("Media"), system: t("System"), profile: t("Profile"), usage: t("AI usage"), plugin: 'Plugin' };
+const ACTION_SHORT = { none: t("None"), keys: t("Key"), macro: t("Macro"), launch: t("Launch"), sound: t("Sound"), media: t("Media"), system: t("System"), profile: t("Profile"), gpu: 'GPU', usage: t("AI usage"), plugin: 'Plugin' };
 
 /** Grid of action types; the Plugin tile shows the chosen plugin action. */
 function actionGrid(cfg, onPick) {
@@ -407,6 +432,7 @@ function defaultAction(type) {
     case 'media': return { type, command: 'playpause' };
     case 'system': return { type, command: 'lock' };
     case 'profile': return { type, profileId: '__back' };
+    case 'gpu': return { type, metric: 'fps' };
     case 'usage': return { type, provider: 'claude', window: 'session' };
     default: return { type: 'none' };
   }
@@ -534,6 +560,13 @@ function actionFields(cfg, changed, redraw, k) {
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, MEDIA.map(([v, l]) => option(v, l, a.command)))];
     case 'system':
       return [h('select', { class: 'rm-select', onchange: (e) => { a.command = e.target.value; changed(); } }, SYSTEM.map(([v, l]) => option(v, l, a.command)))];
+    case 'gpu':
+      return [
+        h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Metric")),
+          h('select', { class: 'rm-select', onchange: (e) => { a.metric = e.target.value; changed(); } },
+            GPU_METRICS.map(([v, label]) => option(v, label, a.metric)))),
+        h('div', { class: 'rm-meta' }, t("FPS needs RivaTuner Statistics Server running; its overlay can stay off. Press the deck key to cycle through metrics.")),
+      ];
     case 'usage':
       return [
         h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Service")),
@@ -813,7 +846,7 @@ function onState(s) {
   renderBanners();
   if (!config) return;
   if (page === 'deck') {
-    for (let k = 1; k <= 15; k++) if (['usage', 'sound'].includes(keyCfg(k).action?.type)) refreshTile(k);
+    for (let k = 1; k <= 15; k++) if (['usage', 'sound', 'gpu'].includes(keyCfg(k).action?.type)) refreshTile(k);
   }
   renderProfileSelect();
   if (profileChanged && page !== 'settings') renderPage();
