@@ -178,6 +178,12 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     });
     *engine_slot.lock().unwrap() = Some(engine_tx.clone());
 
+    // GPU monitor keys: NVML + RTSS, read once a second while such a key is on the deck
+    let gpu_tx = engine_tx.clone();
+    gerzys_deck::gpu::spawn_poller(move |stats| {
+        let _ = gpu_tx.send(Msg::Gpu(stats));
+    });
+
     // AI usage keys: the poller asks the engine which services are on screen
     let (ask, publish) = (engine_tx.clone(), engine_tx.clone());
     gerzys_deck::usage::spawn_poller(

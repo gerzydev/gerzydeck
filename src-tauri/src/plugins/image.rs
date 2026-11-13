@@ -115,6 +115,11 @@ fn raster(bytes: &[u8], mime: Option<&str>) -> Option<RgbaImage> {
     reader.decode().ok().map(|img| img.to_rgba8())
 }
 
+/// Rasterizes an SVG we generated ourselves to 144×144 RGBA (system fonts, no external references).
+pub fn render_svg(text: &str) -> Option<RgbaImage> {
+    svg(text.as_bytes())
+}
+
 fn svg(bytes: &[u8]) -> Option<RgbaImage> {
     if bytes.len() > MAX_INPUT {
         return None;

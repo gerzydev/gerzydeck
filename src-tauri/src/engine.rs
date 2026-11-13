@@ -120,6 +120,8 @@ pub enum Msg {
     Usage { provider: String, result: Result<crate::usage::Usage, String> },
     /// which usage providers have a key on the active profile
     UsageWanted(Sender<Vec<String>>),
+    /// a fresh sample from the GPU poller
+    Gpu(crate::gpu::GpuStats),
     Plugin(PluginEvent),
     SoundPlaying { sound: String, playing: bool },
     /// drag & drop in the editor: swap two keys of a profile (content, action, plugin settings)
@@ -202,6 +204,11 @@ struct Engine {
     /// decoded user images drawn under plugin titles (image id → pixels)
     user_images: HashMap<String, Arc<RgbaImage>>,
     themed_images: HashMap<[u8; 32], Arc<RgbaImage>>,
+    render_gpu: fn(&crate::gpu::GpuTile) -> Vec<u8>,
+    /// last GPU samples, newest last, for the graphs on GPU keys
+    gpu_history: std::collections::VecDeque<crate::gpu::GpuStats>,
+    /// metric a GPU key shows after presses (context → metric); not saved
+    gpu_metrics: HashMap<String, &'static str>,
 }
 
 impl Engine {
@@ -243,6 +250,9 @@ impl Engine {
             frame_pending: false,
             user_images: HashMap::new(),
             themed_images: HashMap::new(),
+            render_gpu: crate::render::render_gpu_jpeg,
+            gpu_history: std::collections::VecDeque::new(),
+            gpu_metrics: HashMap::new(),
         };
         e.refresh_name();
         e.send_sound_devices();
@@ -416,6 +426,9 @@ impl Engine {
         }
         let profile = self.active().clone();
         let now = Instant::now();
+        // the GPU poller only reads while a GPU key is on the deck
+        let gpu_on_screen = (1..=15u8).any(|k| matches!(profile.key(k).action, Action::Gpu { .. }));
+        crate::gpu::WANTED.store(gpu_on_screen, std::sync::atomic::Ordering::Relaxed);
         let mut images = Vec::new();
         self.frame_pending = false;
         for k in 1..=15u8 {
@@ -432,6 +445,16 @@ impl Engine {
                 .filter(|(_, until)| *until > now)
                 .map(|(o, _)| o)
                 .unwrap_or_default();
+            if let Action::Gpu { metric } = &cfg.action {
+                let shown = self.gpu_metrics.get(&context).copied().unwrap_or(metric.as_str());
+                let tile = crate::gpu::tile(shown, &cfg.label, &self.gpu_history);
+                let sig = format!("G|{tile:?}");
+                if self.rendered.get(&k) != Some(&sig) {
+                    images.push((k, (self.render_gpu)(&tile)));
+                    self.rendered.insert(k, sig);
+                }
+                continue;
+            }
             if let Action::Usage { provider, window } = &cfg.action {
                 if !self.usage.contains_key(provider) {
                     // no numbers yet (start, profile switch): ask right away instead of waiting a minute
@@ -694,6 +717,13 @@ impl Engine {
                     let _ = w.send(());
                 }
             }
+            if let Action::Gpu { metric } = &action {
+                let context = context_for(&self.active().id, key);
+                let current = self.gpu_metrics.get(&context).copied().unwrap_or(metric.as_str());
+                self.gpu_metrics.insert(context, crate::gpu::next_metric(current));
+                self.render_active();
+                return;
+            }
             if matches!(action, Action::Sound { .. }) {
                 if self.held_sounds.contains_key(&key) { return; }
                 if let Action::Sound { sound, mode, .. } = &action {
@@ -887,6 +917,15 @@ impl Engine {
                     self.usage.insert(provider, result);
                     self.sink.state(&self.state);
                 }
+                self.render_active();
+            }
+            Msg::Gpu(stats) => {
+                if self.gpu_history.len() >= crate::gpu::HISTORY {
+                    self.gpu_history.pop_front();
+                }
+                self.gpu_history.push_back(stats.clone());
+                self.state.gpu = Some(stats);
+                self.sink.state(&self.state);
                 self.render_active();
             }
             Msg::UsageWanted(reply) => {
@@ -1535,5 +1574,27 @@ mod sound_tests {
         r.e.handle(Msg::SoundPlaying { sound: A.into(), playing: false });
         assert_eq!(r.images(), vec![(1, vec![0]), (2, vec![0])]);
         assert!(!r.states.lock().unwrap().last().unwrap().playing_sounds.contains(A));
+    }
+
+    #[test]
+    fn gpu_key_redraws_on_samples_and_cycles_metrics_on_press() {
+        let mut r = Rig::new();
+        r.e.render_gpu = |t| format!("{}={}", t.caption, t.value.clone().unwrap_or_default()).into_bytes();
+        r.set(1, Action::Gpu { metric: "temp".into() });
+        r.e.handle(Msg::Device(DeviceEvent::Connected));
+        r.images();
+        let sample = crate::gpu::GpuStats { temp: Some(61.0), load: Some(40.0), ..Default::default() };
+        r.e.handle(Msg::Gpu(sample.clone()));
+        let caption = crate::i18n::tr("TEPLOTA", "TEMP");
+        assert_eq!(r.images(), vec![(1, format!("{caption}=61").into_bytes())]);
+        assert_eq!(r.states.lock().unwrap().last().unwrap().gpu.as_ref().and_then(|g| g.temp), Some(61.0));
+        // every sample moves the graph, so the key is redrawn each time
+        r.e.handle(Msg::Gpu(sample.clone()));
+        assert_eq!(r.images().len(), 1);
+        // press: temp → vram (no VRAM numbers yet → dash), press again → power
+        r.e.on_key(1, true);
+        r.e.on_key(1, false);
+        assert_eq!(r.images(), vec![(1, b"VRAM=".to_vec())]);
+        assert_eq!(r.e.config.profiles[0].key(1).action, Action::Gpu { metric: "temp".into() }, "cycling is not saved");
     }
 }

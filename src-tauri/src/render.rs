@@ -295,6 +295,79 @@ pub fn render_usage_jpeg(name: &str, percent: Option<f32>, reset: Option<&str>, 
     tile_jpeg(&c)
 }
 
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// SVG (144×144) of a GPU monitor key: caption on top, big value with its unit, graph of the last samples.
+pub fn gpu_tile_svg(t: &crate::gpu::GpuTile) -> String {
+    let accent = if t.warn { "#ff5a50" } else { "#ff9a3c" };
+    let mut body = String::new();
+    body += &format!(
+        r##"<text x="72" y="31" text-anchor="middle" font-size="16" font-weight="700" letter-spacing="1.2" fill="#9aa0a6">{}</text>"##,
+        xml_escape(&shorten(&t.caption))
+    );
+    match &t.value {
+        Some(v) => {
+            let size = match v.chars().count() { 0..=3 => 46, 4 => 38, _ => 32 };
+            let unit = if t.unit.chars().count() > 2 { 17 } else { 20 };
+            body += &format!(
+                r##"<text x="72" y="84" text-anchor="middle" font-weight="800" fill="#ffffff"><tspan font-size="{size}">{}</tspan><tspan dx="3" font-size="{unit}" font-weight="700" fill="{accent}">{}</tspan></text>"##,
+                xml_escape(v),
+                xml_escape(&t.unit)
+            );
+        }
+        None => body += r##"<text x="72" y="84" text-anchor="middle" font-size="46" font-weight="800" fill="#6b7078">–</text>"##,
+    }
+    if let Some(note) = &t.note {
+        // up to two short lines
+        let mut lines: Vec<String> = vec![String::new()];
+        for word in note.split_whitespace() {
+            if !lines.last().unwrap().is_empty() && lines.last().unwrap().chars().count() + word.chars().count() > 15 {
+                if lines.len() == 2 { break; }
+                lines.push(String::new());
+            }
+            let cur = lines.last_mut().unwrap();
+            if !cur.is_empty() { cur.push(' '); }
+            cur.push_str(word);
+        }
+        for (i, l) in lines.iter().enumerate() {
+            body += &format!(r##"<text x="72" y="{}" text-anchor="middle" font-size="14" font-weight="600" fill="#a8adb2">{}</text>"##, 108 + i as i32 * 17, xml_escape(l));
+        }
+    } else if t.history.len() >= 2 {
+        let (x0, x1, top, bottom) = (14.0f32, 130.0f32, 98.0f32, 128.0f32);
+        let step = (x1 - x0) / (crate::gpu::HISTORY - 1) as f32;
+        // newest sample at the right edge
+        let start = x1 - step * (t.history.len() - 1) as f32;
+        let pts: Vec<String> = t.history.iter().enumerate()
+            .map(|(i, v)| format!("{:.1} {:.1}", start + step * i as f32, bottom - (bottom - top) * v))
+            .collect();
+        let line = pts.join(" L");
+        body += &format!(
+            r##"<path d="M{line} L{x1} {bottom} L{start:.1} {bottom}Z" fill="url(#a)"/><path d="M{line}" fill="none" stroke="{accent}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>"##
+        );
+    }
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><defs><linearGradient id="k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b1d21"/><stop offset="1" stop-color="#0b0c0e"/></linearGradient><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{accent}" stop-opacity="0.38"/><stop offset="1" stop-color="{accent}" stop-opacity="0"/></linearGradient><radialGradient id="h" cx="0.5" cy="0.45" r="0.55"><stop offset="0" stop-color="{accent}" stop-opacity="0.10"/><stop offset="1" stop-color="{accent}" stop-opacity="0"/></radialGradient></defs><rect width="144" height="144" fill="url(#k)"/><rect width="144" height="144" fill="url(#h)"/><path d="M14 128.5h116" stroke="#2a2d32" stroke-width="1.5"/>{body}</svg>"##
+    )
+}
+
+/// GPU monitor key as device JPEG.
+pub fn render_gpu_jpeg(t: &crate::gpu::GpuTile) -> Vec<u8> {
+    let mut canvas = RgbImage::from_pixel(KEY_SIZE, KEY_SIZE, Rgb(DEFAULT_BG));
+    if let Some(img) = crate::plugins::image::render_svg(&gpu_tile_svg(t)) {
+        let small = imageops::resize(&img, KEY_SIZE, KEY_SIZE, FilterType::CatmullRom);
+        for (x, y, p) in small.enumerate_pixels() {
+            let a = p[3] as u32;
+            let dst = canvas.get_pixel_mut(x, y);
+            for c in 0..3 {
+                dst[c] = ((p[c] as u32 * a + dst[c] as u32 * (255 - a)) / 255) as u8;
+            }
+        }
+    }
+    tile_jpeg(&canvas)
+}
+
 pub fn tile_jpeg(canvas: &RgbImage) -> Vec<u8> {
     let mut canvas = canvas.clone();
     round_corners(&mut canvas, CORNER_RADIUS);
@@ -635,5 +708,39 @@ mod preview {
             imageops::overlay(&mut sheet, &tile, i as i64 * 120, 3);
         }
         sheet.save(std::env::temp_dir().join("deck-usage-preview.png")).unwrap();
+    }
+
+    #[test]
+    fn gpu_tile_renders_a_device_jpeg_with_an_amber_graph() {
+        let tile = crate::gpu::GpuTile { caption: "FPS".into(), value: Some("144".into()), unit: "FPS".into(), history: vec![0.2, 0.5, 0.8], warn: false, note: None };
+        let jpeg = render_gpu_jpeg(&tile);
+        let img = imageops::rotate180(&image::load_from_memory(&jpeg).unwrap().to_rgb8());
+        assert_eq!(img.dimensions(), (KEY_SIZE, KEY_SIZE));
+        // the newest point of the graph sits at the right edge: amber line there
+        let found = (60..92).any(|y| { let p = img.get_pixel(90, y); p[0] > 180 && p[1] > 100 && p[2] < 110 });
+        assert!(found, "amber graph line near the right edge");
+        assert!(gpu_tile_svg(&crate::gpu::GpuTile { caption: "<&>".into(), ..tile }).contains("&lt;&amp;&gt;"));
+    }
+
+    #[test]
+    #[ignore]
+    fn write_gpu_preview() {
+        use crate::gpu::GpuTile;
+        let wave = |n: usize, f: fn(f32) -> f32| (0..n).map(|i| f(i as f32)).collect::<Vec<f32>>();
+        let tiles = [
+            GpuTile { caption: "FPS".into(), value: Some("144".into()), unit: "FPS".into(), history: wave(30, |i| 0.7 + 0.12 * (i * 0.6).sin()), warn: false, note: None },
+            GpuTile { caption: "ZÁTĚŽ GPU".into(), value: Some("97".into()), unit: "%".into(), history: wave(30, |i| (0.5 + i * 0.02).min(0.97)), warn: false, note: None },
+            GpuTile { caption: "TEPLOTA".into(), value: Some("86".into()), unit: "°C".into(), history: wave(30, |i| 0.6 + i * 0.006), warn: true, note: None },
+            GpuTile { caption: "VRAM".into(), value: Some("9,4".into()), unit: "GB".into(), history: wave(12, |_| 0.58), warn: false, note: None },
+            GpuTile { caption: "TAKT".into(), value: Some("2610".into()), unit: "MHz".into(), history: wave(30, |i| 0.8 + 0.1 * (i * 0.3).cos()), warn: false, note: None },
+            GpuTile { caption: "FPS".into(), value: None, unit: String::new(), history: vec![], warn: false, note: None },
+            GpuTile { caption: "TEPLOTA".into(), value: None, unit: String::new(), history: vec![], warn: false, note: Some("Ovladač NVIDIA nenalezen".into()) },
+        ];
+        let mut sheet = RgbImage::from_pixel(tiles.len() as u32 * 120, 110, Rgb([30, 31, 34]));
+        for (i, t) in tiles.iter().enumerate() {
+            let tile = imageops::rotate180(&image::load_from_memory(&render_gpu_jpeg(t)).unwrap().to_rgb8());
+            imageops::overlay(&mut sheet, &tile, i as i64 * 120 + 8, 3);
+        }
+        sheet.save(std::env::temp_dir().join("deck-gpu-preview.png")).unwrap();
     }
 }
