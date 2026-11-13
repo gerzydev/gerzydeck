@@ -12,7 +12,7 @@ Unofficial Windows software for the **Fifine AmpliGame D6** (15 LCD keys), a rep
 - **Stream Deck plugins:** install straight from the app, from the OpenAction catalogue and the Elgato store archive (OBS, Spotify, Discord, PC metrics and hundreds more).
 - **Unified plugin look:** plugin keys match the app’s style and keep changing with plugin state; switch back globally or per key.
 - **Soundboard:** a key plays a sound to your headphones and into your microphone at once, so people in a game or on Discord hear it too.
-- **Performance monitor:** CPU load and RAM from Windows, CPU temperature from MSI Afterburner, NVIDIA metrics via NVML and game FPS via PresentMon; press the key to cycle metrics within its group.
+- **Performance monitor:** CPU load and RAM from Windows, CPU temperature from MSI Afterburner, NVIDIA metrics via NVML and game FPS via PresentMon; choose up to three metric slots and press the key to cycle between them.
 - **AI usage:** keys showing your Claude and ChatGPT (Codex) plan limits and the time until they reset.
 - **Icons:** the Iconify catalogue (over 200,000 open-source icons), your own icon library and `.streamDeckIconPack` import.
 - **Boot logo:** your own 800 × 480 image shown when the deck is plugged in.
@@ -53,7 +53,7 @@ To send sound into a game or Discord, use a virtual microphone. SteelSeries Sona
 
 ## Performance monitor
 
-Assign a **Performance monitor (GPU, CPU, RAM)** action and choose its initial metric. **Frames (PresentMon)** includes FPS, frame time, 1% low FPS, display latency, click latency and a CPU/GPU bottleneck label. **Graphics (NVIDIA)** includes GPU load, temperature, VRAM, power, core clock and fan speed. **Processor and memory** includes CPU load, CPU temperature and RAM. Pressing the key cycles within the selected group. Unavailable readings show a dash; RAM and VRAM show used/total GB with one decimal place.
+Assign a **Performance monitor (GPU, CPU, RAM)** action and choose up to three different metric slots from any group. **Frames (PresentMon)** includes FPS, frame time, 1% low FPS, display latency, click latency and a CPU/GPU bottleneck label. **Graphics (NVIDIA)** includes GPU load, temperature, VRAM, power, core clock and fan speed. **Processor and memory** includes CPU load, CPU temperature and RAM. Slot 1 is shown at startup. Pressing the key cycles only between the selected slots; with one slot, pressing leaves it unchanged. Unavailable readings show a dash; RAM and VRAM show used/total GB with one decimal place.
 
 CPU load and RAM come directly from Windows and work without an NVIDIA card. CPU temperature requires **MSI Afterburner** running with **CPU temperature** enabled under **Settings → Monitoring**; the hottest reported CPU sensor is shown. NVIDIA readings use NVML from the installed NVIDIA driver.
 
