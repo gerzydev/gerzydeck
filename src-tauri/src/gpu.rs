@@ -2,12 +2,16 @@
 
 use serde::Serialize;
 
-/// GPU metrics, in the order a key press cycles through them.
-pub const GPU_METRICS: &[&str] = &["fps", "load", "temp", "vram", "power", "clock", "fan"];
+/// Frame metrics from PresentMon, in the order a key press cycles through them.
+pub const FRAME_METRICS: &[&str] = &["fps", "frametime", "low1", "latency", "click", "bound"];
+/// GPU metrics from NVML, cycled the same way.
+pub const GPU_METRICS: &[&str] = &["load", "temp", "vram", "power", "clock", "fan"];
 /// CPU / memory metrics, cycled the same way (a press stays inside the key's group).
 pub const CPU_METRICS: &[&str] = &["cpu", "cputemp", "ram"];
 /// Every metric a monitor key can show (config validation).
-pub const METRICS: &[&str] = &["fps", "load", "temp", "vram", "power", "clock", "fan", "cpu", "cputemp", "ram"];
+pub const METRICS: &[&str] = &[
+    "fps", "frametime", "low1", "latency", "click", "bound", "load", "temp", "vram", "power", "clock", "fan", "cpu", "cputemp", "ram",
+];
 
 /// One sample of everything the monitor reads. Units: %, °C, MiB, W, MHz.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -26,6 +30,16 @@ pub struct GpuStats {
     pub fps: Option<f32>,
     /// executable the FPS belongs to
     pub fps_app: Option<String>,
+    /// average frame time, ms
+    pub frame_time: Option<f32>,
+    /// 1% low FPS
+    pub fps_low: Option<f32>,
+    /// frame start → on screen, ms
+    pub latency: Option<f32>,
+    /// last mouse click → on screen, ms
+    pub click_latency: Option<f32>,
+    /// share of the frame time the GPU was busy, %; 90 and more means the GPU limits the frame rate
+    pub gpu_bound: Option<f32>,
     /// why FPS capture does not run: "permission" (user not in Performance Log Users) | "unavailable"
     pub fps_error: Option<String>,
     /// why NVML gave nothing (no NVIDIA driver, …)
@@ -88,9 +102,14 @@ pub fn spawn_poller(presentmon: Option<std::path::PathBuf>, publish: impl Fn(Gpu
                     None => GpuStats { error: nvml_error.clone(), ..GpuStats::default() },
                 };
                 let fg = foreground_pid();
-                if let Some((fps, app)) = fg.and_then(|pid| pm.fps(pid)) {
-                    stats.fps = Some(fps);
-                    stats.fps_app = Some(app);
+                if let Some(f) = fg.and_then(|pid| pm.sample(pid)) {
+                    stats.fps = Some(f.fps);
+                    stats.fps_app = Some(f.app);
+                    stats.frame_time = Some(f.frame_time);
+                    stats.fps_low = f.fps_low;
+                    stats.latency = f.latency;
+                    stats.click_latency = f.click_latency;
+                    stats.gpu_bound = f.gpu_bound;
                 } else if let Some(f) = crate::rtss::read_fps(fg) {
                     stats.fps = Some(f.fps);
                     stats.fps_app = Some(f.app);
@@ -188,6 +207,11 @@ fn foreground_pid() -> Option<u32> {
 pub fn metric_value(stats: &GpuStats, metric: &str) -> Option<f32> {
     match metric {
         "fps" => stats.fps,
+        "frametime" => stats.frame_time,
+        "low1" => stats.fps_low,
+        "latency" => stats.latency,
+        "click" => stats.click_latency,
+        "bound" => stats.gpu_bound,
         "load" => stats.load,
         "temp" => stats.temp,
         "vram" => stats.vram_used,
@@ -203,7 +227,7 @@ pub fn metric_value(stats: &GpuStats, metric: &str) -> Option<f32> {
 
 /// Metric shown after `current` when the key is pressed; the press stays inside its group.
 pub fn next_metric(current: &str) -> &'static str {
-    let group = if CPU_METRICS.contains(&current) { CPU_METRICS } else { GPU_METRICS };
+    let group = [FRAME_METRICS, GPU_METRICS, CPU_METRICS].into_iter().find(|g| g.contains(&current)).unwrap_or(FRAME_METRICS);
     let i = group.iter().position(|m| *m == current).map_or(0, |i| (i + 1) % group.len());
     group[i]
 }
@@ -232,6 +256,11 @@ fn caption(metric: &str) -> String {
     use crate::i18n::tr;
     match metric {
         "fps" => "FPS",
+        "frametime" => tr("DOBA SNÍMKU", "FRAME TIME"),
+        "low1" => "1% LOW",
+        "latency" => tr("LATENCE", "LATENCY"),
+        "click" => tr("ODEZVA KLIKU", "CLICK LAT."),
+        "bound" => tr("LIMITUJE", "BOTTLENECK"),
         "load" => tr("ZÁTĚŽ GPU", "GPU LOAD"),
         "temp" => tr("TEPLOTA GPU", "GPU TEMP"),
         "cpu" => "CPU",
@@ -256,7 +285,9 @@ pub fn tile(metric: &str, label: &str, history: &std::collections::VecDeque<GpuS
     let (text, unit) = match (metric, value) {
         (_, None) => (None, ""),
         ("vram" | "ram", Some(v)) => (Some(decimal(v / 1024.0)), "GB"),
-        ("fps", Some(v)) => (Some(format!("{}", v.round() as i64)), "FPS"),
+        ("fps" | "low1", Some(v)) => (Some(format!("{}", v.round() as i64)), "FPS"),
+        ("frametime" | "latency" | "click", Some(v)) => (Some(if v < 10.0 { decimal(v) } else { format!("{}", v.round() as i64) }), "ms"),
+        ("bound", Some(v)) => (Some(if v >= 90.0 { "GPU" } else { "CPU" }.to_string()), ""),
         ("temp" | "cputemp", Some(v)) => (Some(format!("{}", v.round() as i64)), "°C"),
         ("power", Some(v)) => (Some(format!("{}", v.round() as i64)), "W"),
         ("clock", Some(v)) => (Some(format!("{}", v.round() as i64)), "MHz"),
@@ -274,18 +305,20 @@ pub fn tile(metric: &str, label: &str, history: &std::collections::VecDeque<GpuS
         "load" | "fan" | "cpu" => (0.0, 100.0),
         "temp" | "cputemp" => (20.0, 100.0),
         "vram" | "ram" => (0.0, total.unwrap_or(peak).max(1.0)),
-        "fps" => (0.0, (peak * 1.15).max(30.0)),
+        "fps" | "low1" => (0.0, (peak * 1.15).max(30.0)),
+        "frametime" | "latency" | "click" => (0.0, (peak * 1.2).max(5.0)),
+        "bound" => (0.0, 100.0),
         "power" => (0.0, (peak * 1.2).max(50.0)),
         _ => (0.0, (peak * 1.1).max(1.0)),
     };
     let history = series.iter().map(|v| ((v - lo) / (hi - lo)).clamp(0.0, 1.0)).collect();
     // NVML errors concern the graphics card only; FPS comes from RTSS and may still be there
     let gpu_metric = GPU_METRICS.contains(&metric);
-    let fps_note = latest.and_then(|s| s.fps_error.as_deref()).filter(|_| metric == "fps" && value.is_none()).map(|e| match e {
+    let fps_note = latest.and_then(|s| s.fps_error.as_deref()).filter(|_| FRAME_METRICS.contains(&metric) && value.is_none()).map(|e| match e {
         "permission" => crate::i18n::tr("Povol měření FPS", "Allow FPS capture").to_string(),
         _ => crate::i18n::tr("FPS nedostupné", "FPS unavailable").to_string(),
     });
-    let note = fps_note.or_else(|| latest.and_then(|s| s.error.clone()).filter(|_| gpu_metric && (metric != "fps" || value.is_none())));
+    let note = fps_note.or_else(|| latest.and_then(|s| s.error.clone()).filter(|_| gpu_metric));
     GpuTile { caption, value: text, unit: unit.into(), history, warn, note }
 }
 
@@ -295,8 +328,10 @@ mod tests {
 
     #[test]
     fn metrics_cycle_and_wrap() {
-        assert_eq!(next_metric("fps"), "load");
-        assert_eq!(next_metric("fan"), "fps");
+        assert_eq!(next_metric("fps"), "frametime");
+        assert_eq!(next_metric("bound"), "fps");
+        assert_eq!(next_metric("load"), "temp");
+        assert_eq!(next_metric("fan"), "load");
         assert_eq!(next_metric("bogus"), "fps");
         assert_eq!(next_metric("cpu"), "cputemp");
         assert_eq!(next_metric("ram"), "cpu");
@@ -397,5 +432,17 @@ mod tests {
         assert_eq!(t.value, None);
         assert_eq!(t.note.as_deref(), Some(crate::i18n::tr("Povol měření FPS", "Allow FPS capture")));
         assert_eq!(tile("load", "", &h).note, None);
+    }
+
+    #[test]
+    fn frame_tiles() {
+        let s = GpuStats { fps: Some(250.0), frame_time: Some(4.04), fps_low: Some(180.0), latency: Some(12.6), click_latency: None, gpu_bound: Some(95.0), ..GpuStats::default() };
+        let h: std::collections::VecDeque<_> = [s].into();
+        let v = |m: &str| { let t = tile(m, "", &h); (t.value, t.unit) };
+        assert_eq!(v("frametime"), (Some(crate::i18n::tr("4,0", "4.0").into()), "ms".into()));
+        assert_eq!(v("low1"), (Some("180".into()), "FPS".into()));
+        assert_eq!(v("latency"), (Some("13".into()), "ms".into()));
+        assert_eq!(v("click"), (None, String::new()));
+        assert_eq!(v("bound"), (Some("GPU".into()), String::new()));
     }
 }

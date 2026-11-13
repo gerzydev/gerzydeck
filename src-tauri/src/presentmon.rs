@@ -11,78 +11,152 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const SESSION: &str = "GerzysDeckFps";
-/// frames older than this do not count (the game paused, closed or lost focus)
+/// frames older than this do not count for FPS / latency (the game paused, closed or lost focus)
 const WINDOW: Duration = Duration::from_millis(1500);
+/// frames kept for the 1% low
+const LOW_WINDOW: Duration = Duration::from_secs(10);
+/// a click latency stays shown this long after the last click
+const CLICK_HOLD: Duration = Duration::from_secs(10);
 /// wait before starting PresentMon again after it failed
 const RETRY: Duration = Duration::from_secs(30);
 
-/// Where the frame time of a CSV row comes from, decided by the header.
+/// One presented frame of one process.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FrameRow {
+    /// time between this present and the previous one, ms
+    ms: f32,
+    /// frame start → on screen, ms
+    latency: Option<f32>,
+    /// mouse click → on screen, ms (only on frames a click contributed to)
+    click: Option<f32>,
+    /// GPU busy time of the frame, ms
+    gpu_busy: Option<f32>,
+}
+
+/// Everything the deck shows about the frames of one process.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrameSample {
+    pub app: String,
+    pub fps: f32,
+    pub frame_time: f32,
+    /// average FPS of the slowest 1 % of frames
+    pub fps_low: Option<f32>,
+    pub latency: Option<f32>,
+    pub click_latency: Option<f32>,
+    /// share of the frame time the GPU was busy, %
+    pub gpu_bound: Option<f32>,
+}
+
+/// Column positions in PresentMon's CSV, decided by the header. Names are accepted with or
+/// without the "Ms" prefix, the column set differs between PresentMon versions.
 #[derive(Debug, Clone, PartialEq)]
 struct Columns {
     app: usize,
     pid: usize,
     frame: FrameTime,
+    latency: Option<usize>,
+    click: Option<usize>,
+    gpu_busy: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum FrameTime {
     Column(usize),
-    /// CPU busy + wait (newer metric sets without MsBetweenPresents)
+    /// CPU busy + wait (metric sets without MsBetweenPresents)
     Sum(usize, usize),
 }
 
 impl Columns {
     fn from_header(header: &str) -> Option<Self> {
         let names: Vec<&str> = header.trim().split(',').map(str::trim).collect();
-        let at = |n: &str| names.iter().position(|c| *c == n);
-        let frame = at("MsBetweenPresents")
-            .or_else(|| at("MsBetweenAppStart"))
+        let at = |n: &str| names.iter().position(|c| *c == n || c.strip_prefix("Ms") == Some(n));
+        let frame = at("BetweenPresents")
+            .or_else(|| at("BetweenAppStart"))
             .map(FrameTime::Column)
-            .or_else(|| Some(FrameTime::Sum(at("MsCPUBusy")?, at("MsCPUWait")?)))?;
-        Some(Self { app: at("Application")?, pid: at("ProcessID")?, frame })
+            .or_else(|| Some(FrameTime::Sum(at("CPUBusy")?, at("CPUWait")?)))?;
+        Some(Self {
+            app: at("Application")?,
+            pid: at("ProcessID")?,
+            frame,
+            latency: at("DisplayLatency"),
+            click: at("ClickToPhotonLatency"),
+            gpu_busy: at("GPUBusy"),
+        })
     }
 
-    /// (pid, application, frame time in ms) of one CSV row.
-    fn row(&self, line: &str) -> Option<(u32, String, f32)> {
+    /// (pid, application, frame) of one CSV row.
+    fn row(&self, line: &str) -> Option<(u32, String, FrameRow)> {
         let cells: Vec<&str> = line.trim().split(',').collect();
-        let num = |i: usize| cells.get(i)?.trim().parse::<f32>().ok().filter(|v| v.is_finite());
+        let num = |i: usize| cells.get(i)?.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v >= 0.0 && *v < 10_000.0);
         let ms = match self.frame {
             FrameTime::Column(i) => num(i)?,
             FrameTime::Sum(a, b) => num(a)? + num(b)?,
         };
+        if ms <= 0.0 {
+            return None;
+        }
         let pid = cells.get(self.pid)?.trim().parse().ok()?;
-        (ms > 0.0 && ms < 10_000.0).then(|| (pid, cells.get(self.app).map_or("", |s| s.trim()).to_string(), ms))
+        let app = cells.get(self.app).map_or("", |s| s.trim()).to_string();
+        let opt = |c: Option<usize>| c.and_then(num);
+        Some((pid, app, FrameRow { ms, latency: opt(self.latency), click: opt(self.click).filter(|v| *v > 0.0), gpu_busy: opt(self.gpu_busy) }))
     }
 }
 
 /// Recent frames per process.
 #[derive(Default)]
 struct Frames {
-    by_pid: HashMap<u32, (String, VecDeque<(Instant, f32)>)>,
+    by_pid: HashMap<u32, Process>,
+}
+
+struct Process {
+    app: String,
+    frames: VecDeque<(Instant, FrameRow)>,
+    last_click: Option<(Instant, f32)>,
+}
+
+fn mean(v: impl Iterator<Item = f32>) -> Option<f32> {
+    let (sum, n) = v.fold((0.0f32, 0usize), |(s, n), x| (s + x, n + 1));
+    (n > 0).then(|| sum / n as f32)
 }
 
 impl Frames {
-    fn push(&mut self, pid: u32, app: String, ms: f32, now: Instant) {
-        let (_, frames) = self.by_pid.entry(pid).or_insert_with(|| (app, VecDeque::new()));
-        frames.push_back((now, ms));
-        while frames.front().is_some_and(|(t, _)| now.duration_since(*t) > WINDOW) {
-            frames.pop_front();
+    fn push(&mut self, pid: u32, app: String, row: FrameRow, now: Instant) {
+        let p = self.by_pid.entry(pid).or_insert_with(|| Process { app, frames: VecDeque::new(), last_click: None });
+        p.frames.push_back((now, row));
+        if let Some(c) = row.click {
+            p.last_click = Some((now, c));
+        }
+        while p.frames.front().is_some_and(|(t, _)| now.duration_since(*t) > LOW_WINDOW) {
+            p.frames.pop_front();
         }
         // forget processes that stopped presenting
         if self.by_pid.len() > 64 {
-            self.by_pid.retain(|_, (_, f)| f.back().is_some_and(|(t, _)| now.duration_since(*t) <= WINDOW));
+            self.by_pid.retain(|_, p| p.frames.back().is_some_and(|(t, _)| now.duration_since(*t) <= WINDOW));
         }
     }
 
-    /// Average frame rate of `pid` over the last frames, with its executable name.
-    fn fps(&self, pid: u32, now: Instant) -> Option<(f32, String)> {
-        let (app, frames) = self.by_pid.get(&pid)?;
-        let recent: Vec<f32> = frames.iter().filter(|(t, _)| now.duration_since(*t) <= WINDOW).map(|(_, ms)| *ms).collect();
-        if recent.is_empty() {
-            return None;
-        }
-        let mean = recent.iter().sum::<f32>() / recent.len() as f32;
-        Some((1000.0 / mean, app.clone()))
+    /// Frame numbers of `pid` over the last frames.
+    fn sample(&self, pid: u32, now: Instant) -> Option<FrameSample> {
+        let p = self.by_pid.get(&pid)?;
+        let recent: Vec<FrameRow> = p.frames.iter().filter(|(t, _)| now.duration_since(*t) <= WINDOW).map(|(_, r)| *r).collect();
+        let frame_time = mean(recent.iter().map(|r| r.ms))?;
+        // 1% low: the slowest 1 % of the frames of the last 10 s (at least 100 frames)
+        let mut all: Vec<f32> = p.frames.iter().map(|(_, r)| r.ms).collect();
+        let fps_low = (all.len() >= 100).then(|| {
+            all.sort_by(|a, b| b.total_cmp(a));
+            let worst = &all[..all.len() / 100];
+            1000.0 / (worst.iter().sum::<f32>() / worst.len() as f32)
+        });
+        let busy: Vec<f32> = recent.iter().filter_map(|r| Some(r.gpu_busy? / r.ms)).collect();
+        Some(FrameSample {
+            app: p.app.clone(),
+            fps: 1000.0 / frame_time,
+            frame_time,
+            fps_low,
+            latency: mean(recent.iter().filter_map(|r| r.latency)),
+            click_latency: p.last_click.filter(|(t, _)| now.duration_since(*t) <= CLICK_HOLD).map(|(_, c)| c),
+            gpu_bound: mean(busy.into_iter()).map(|b| (b * 100.0).clamp(0.0, 100.0)),
+        })
     }
 }
 
@@ -158,7 +232,6 @@ impl PresentMon {
         let mut cmd = Command::new(exe);
         cmd.args([
             "--output_stdout", "--no_console_stats", "--stop_existing_session", "--session_name", SESSION,
-            "--no_track_display", "--no_track_gpu", "--no_track_input",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -176,8 +249,8 @@ impl PresentMon {
                 return;
             };
             for line in lines.map_while(Result::ok) {
-                if let Some((pid, app, ms)) = columns.row(&line) {
-                    frames.lock().unwrap().push(pid, app, ms, Instant::now());
+                if let Some((pid, app, row)) = columns.row(&line) {
+                    frames.lock().unwrap().push(pid, app, row, Instant::now());
                 }
             }
         })?;
@@ -198,10 +271,10 @@ impl PresentMon {
         Ok(())
     }
 
-    /// Frame rate of the process `pid` (the foreground window's), with its executable.
-    pub fn fps(&self, pid: u32) -> Option<(f32, String)> {
+    /// Frame numbers of the process `pid` (the foreground window's).
+    pub fn sample(&self, pid: u32) -> Option<FrameSample> {
         self.child.as_ref()?;
-        self.frames.lock().unwrap().fps(pid, Instant::now())
+        self.frames.lock().unwrap().sample(pid, Instant::now())
     }
 
     pub fn running(&self) -> bool {
@@ -291,13 +364,21 @@ mod job {
 mod tests {
     use super::*;
 
+    fn row(ms: f32) -> FrameRow {
+        FrameRow { ms, latency: None, click: None, gpu_busy: None }
+    }
+
     #[test]
-    fn header_picks_frame_time_column_or_cpu_sum() {
-        let c = Columns::from_header("Application,ProcessID,SwapChainAddress,PresentRuntime,MsBetweenPresents,MsInPresentAPI").unwrap();
-        assert_eq!(c, Columns { app: 0, pid: 1, frame: FrameTime::Column(4) });
-        assert_eq!(c.row("cs2.exe,19492,0x1F,DXGI,3.472,0.1"), Some((19492, "cs2.exe".into(), 3.472)));
+    fn header_picks_columns_with_or_without_ms_prefix() {
+        let c = Columns::from_header("Application,ProcessID,SwapChainAddress,MsBetweenPresents,DisplayLatency,MsClickToPhotonLatency,MsGPUBusy").unwrap();
+        assert_eq!(c, Columns { app: 0, pid: 1, frame: FrameTime::Column(3), latency: Some(4), click: Some(5), gpu_busy: Some(6) });
+        assert_eq!(
+            c.row("cs2.exe,19492,0x1F,4.0,12.5,NA,3.6"),
+            Some((19492, "cs2.exe".into(), FrameRow { ms: 4.0, latency: Some(12.5), click: None, gpu_busy: Some(3.6) }))
+        );
         let v2 = Columns::from_header("Application,ProcessID,CPUStartTime,MsCPUBusy,MsCPUWait").unwrap();
-        assert_eq!(v2.row("game.exe,7,12.5,6.0,2.0").map(|r| r.2), Some(8.0));
+        assert_eq!(v2.row("game.exe,7,12.5,6.0,2.0").map(|r| r.2.ms), Some(8.0));
+        assert_eq!((v2.latency, v2.click, v2.gpu_busy), (None, None, None));
         assert!(Columns::from_header("Application,Something").is_none());
     }
 
@@ -310,21 +391,45 @@ mod tests {
     }
 
     #[test]
-    fn fps_averages_recent_frames_of_one_process() {
+    fn sample_averages_recent_frames_of_one_process() {
         let mut f = Frames::default();
         let t0 = Instant::now();
         for i in 0..10 {
-            f.push(1, "cs2.exe".into(), 4.0, t0 + Duration::from_millis(i * 4));
-            f.push(2, "chrome.exe".into(), 16.0, t0 + Duration::from_millis(i * 16));
+            f.push(1, "cs2.exe".into(), FrameRow { ms: 4.0, latency: Some(10.0), click: None, gpu_busy: Some(3.8) }, t0 + Duration::from_millis(i * 4));
+            f.push(2, "chrome.exe".into(), FrameRow { gpu_busy: Some(4.0), ..row(16.0) }, t0 + Duration::from_millis(i * 16));
         }
         let now = t0 + Duration::from_millis(200);
-        let (fps, app) = f.fps(1, now).unwrap();
-        assert_eq!(app, "cs2.exe");
-        assert!((fps - 250.0).abs() < 0.01);
-        assert!((f.fps(2, now).unwrap().0 - 62.5).abs() < 0.01);
-        assert_eq!(f.fps(3, now), None);
-        // nothing for longer than the window: no frame rate
-        assert_eq!(f.fps(1, t0 + Duration::from_secs(3)), None);
+        let s = f.sample(1, now).unwrap();
+        assert_eq!(s.app, "cs2.exe");
+        assert!((s.fps - 250.0).abs() < 0.01 && (s.frame_time - 4.0).abs() < 0.01);
+        assert_eq!(s.latency, Some(10.0));
+        assert!((s.gpu_bound.unwrap() - 95.0).abs() < 0.01, "GPU busy 3.8 of 4 ms");
+        assert!((f.sample(2, now).unwrap().gpu_bound.unwrap() - 25.0).abs() < 0.01);
+        assert_eq!(s.fps_low, None, "fewer than 100 frames");
+        assert_eq!(f.sample(3, now), None);
+        assert_eq!(f.sample(1, t0 + Duration::from_secs(3)), None, "nothing recent");
+    }
+
+    #[test]
+    fn one_percent_low_uses_the_slowest_frames() {
+        let mut f = Frames::default();
+        let t0 = Instant::now();
+        for i in 0..200u64 {
+            // two hitches of 50 ms among 4 ms frames
+            let ms = if i == 50 || i == 150 { 50.0 } else { 4.0 };
+            f.push(1, "g.exe".into(), row(ms), t0 + Duration::from_millis(i * 5));
+        }
+        let s = f.sample(1, t0 + Duration::from_millis(1000)).unwrap();
+        assert!((s.fps_low.unwrap() - 20.0).abs() < 0.01, "{:?}", s.fps_low);
+    }
+
+    #[test]
+    fn click_latency_is_held_for_a_while() {
+        let mut f = Frames::default();
+        let t0 = Instant::now();
+        f.push(1, "g.exe".into(), FrameRow { click: Some(18.0), ..row(4.0) }, t0);
+        f.push(1, "g.exe".into(), row(4.0), t0 + Duration::from_millis(500));
+        assert_eq!(f.sample(1, t0 + Duration::from_millis(600)).unwrap().click_latency, Some(18.0));
     }
 
     #[test]
