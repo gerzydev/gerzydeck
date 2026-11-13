@@ -26,6 +26,8 @@ pub struct GpuStats {
     pub fps: Option<f32>,
     /// executable the FPS belongs to
     pub fps_app: Option<String>,
+    /// why FPS capture does not run: "permission" (user not in Performance Log Users) | "unavailable"
+    pub fps_error: Option<String>,
     /// why NVML gave nothing (no NVIDIA driver, …)
     pub error: Option<String>,
     /// total CPU load in %
