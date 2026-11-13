@@ -10,6 +10,7 @@ Unofficial Windows software for the **Fifine AmpliGame D6** (15 LCD keys), a rep
 - **Actions:** key or shortcut, macro, launch a program or website, media and volume, lock or sleep the PC, switch profile.
 - **Profiles:** 15 keys each, switching automatically by the program in the foreground (e.g. `wow.exe`).
 - **Stream Deck plugins:** install straight from the app, from the OpenAction catalogue and the Elgato store archive (OBS, Spotify, Discord, PC metrics and hundreds more).
+- **Soundboard:** a key plays a sound to your headphones and into your microphone at once, so people in a game or on Discord hear it too.
 - **AI usage:** keys showing your Claude and ChatGPT (Codex) plan limits and the time until they reset.
 - **Icons:** the Iconify catalogue (over 200,000 open-source icons), your own icon library and `.streamDeckIconPack` import.
 - **Boot logo:** your own 800 × 480 image shown when the deck is plugged in.
@@ -41,6 +42,12 @@ This is unofficial software and you use it **at your own risk**. The full terms 
 - **AI usage** reads undocumented Anthropic and OpenAI interfaces with the logins of Claude Code and Codex, and refreshes them when they expire. These interfaces may change or stop working at any time.
 - **Plugins** are third-party programs running on your computer. Only install ones you trust.
 - **Keys and macros:** some games (anti-cheat) forbid simulated input. In World of Warcraft, more than one game action per key press breaks Blizzard's rules.
+
+## Soundboard
+
+Assign a Sound action to play MP3, WAV, OGG or FLAC files (up to 50 MB), with separate volumes for your headphones and the microphone. Choose play/stop, restart, play while held, or stop all sounds. Test previews play only to your own output.
+
+To send sound into a game or Discord, use a virtual microphone. SteelSeries Sonar's “Microphone” playback device works out of the box with Auto. Alternatively, install the free VB-Audio Virtual Cable or Voicemeeter, pick its playback device in Settings → Soundboard, and select the corresponding virtual microphone in your game or Discord. Turn off Discord/Krisp noise suppression if it filters the sound.
 
 ## Development
 
@@ -84,9 +91,3 @@ The source code is released under the [MIT License](LICENSE). The installer addi
 - Built with [Tauri](https://tauri.app).
 
 gerzyDECK is not affiliated with Fifine, Mirabox, Elgato/Corsair, Anthropic or OpenAI. All trademarks belong to their owners.
-
-## Soundboard
-
-Assign a Sound action to play MP3, WAV, OGG or FLAC files (up to 50 MB), with separate volumes for your headphones and the microphone. Choose play/stop, restart, play while held, or stop all sounds. Test previews play only to your own output.
-
-To send sound into a game or Discord, use a virtual microphone. SteelSeries Sonar's “Microphone” playback device works out of the box with Auto. Alternatively, install the free VB-Audio Virtual Cable or Voicemeeter, pick its playback device in Settings → Soundboard, and select the corresponding virtual microphone in your game or Discord. Turn off Discord/Krisp noise suppression if it filters the sound.
