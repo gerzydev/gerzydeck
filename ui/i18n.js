@@ -21,6 +21,15 @@ export function plural(n, one, many, csOne, csFew, csMany) {
 }
 
 const CS = {
+  "Enable FPS": "Povol FPS",
+  "FPS is measured by PresentMon.": "FPS měří PresentMon.",
+  "Sign out and sign back in, then FPS will work.": "Odhlas se a znovu přihlas, pak FPS poběží.",
+  "Enable FPS once by adding your account to Performance Log Users. Windows asks for administrator approval. PresentMon does not inject into the game.": "Jednorázově povol FPS přidáním svého účtu do skupiny Uživatelé protokolu výkonu. Windows požádá o potvrzení správce. PresentMon do hry nic nevkládá.",
+  "Waiting for administrator approval…": "Čekám na potvrzení správce…",
+  "Enable FPS measurement": "Povolit měření FPS",
+  "Retry": "Zkusit znovu",
+  "FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to cycle metrics within its group.": "FPS měří PresentMon (Windows ETW, funguje i s anti-cheatem); RTSS je volitelná záloha. Teplota CPU potřebuje běžící MSI Afterburner se zapnutou teplotou CPU v Nastavení → Monitorování. Stiskem klávesy na decku přepneš údaj v rámci jeho skupiny.",
+
   "Monitor": "Monitor",
   "CPU load": "CPU zátěž",
   "CPU temperature": "Teplota CPU",

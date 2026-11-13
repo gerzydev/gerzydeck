@@ -205,15 +205,49 @@ function gpuPreview(cfg) {
   const cpu = CPU_METRICS.some(([m]) => m === metric);
   const memory = metric === 'vram' || metric === 'ram';
   const gb = (v) => Number.isFinite(v) ? (v / 1024).toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '–';
-  const value = memory ? gpu ? gb(gpu[metric === 'ram' ? 'ramUsed' : 'vramUsed']) + ' / ' + gb(gpu[metric === 'ram' ? 'ramTotal' : 'vramTotal']) : '–'
+  const permissionNeeded = metric === 'fps' && !Number.isFinite(gpu?.fps) && gpu?.fpsError === 'permission';
+  const value = permissionNeeded ? t("Enable FPS") : memory ? gpu ? gb(gpu[metric === 'ram' ? 'ramUsed' : 'vramUsed']) + ' / ' + gb(gpu[metric === 'ram' ? 'ramTotal' : 'vramTotal']) : '–'
     : number(gpu?.[metric === 'cputemp' ? 'cpuTemp' : metric]);
   const box = h('span', { class: 'usage-prev gpu-prev', title: cpu ? caption : gpu?.name || '' },
     h('span', { class: 'u-name' }, cfg.label || caption),
-    h('span', { class: memory ? 'gpu-value is-wide' : 'gpu-value' }, value),
+    h('span', { class: memory || permissionNeeded ? 'gpu-value is-wide' : 'gpu-value' }, value),
     h('span', { class: 'gpu-unit' }, unit));
-  if (!cpu && gpu?.error) box.append(h('span', { class: 'u-msg' }, gpu.error));
+  if (!cpu && !permissionNeeded && gpu?.error) box.append(h('span', { class: 'u-msg' }, gpu.error));
   else if (metric === 'fps' && gpu?.fpsApp) box.append(h('span', { class: 'u-reset gpu-app', title: gpu.fpsApp }, gpu.fpsApp));
   return box;
+}
+
+let fpsPermissionGrant = null;
+function fpsPermissionPanel() {
+  const panel = h('div', { class: 'rm-note is-info fps-permission' });
+  let status = null;
+  let error = null;
+  const draw = () => {
+    if (error) {
+      panel.replaceChildren(h('span', { class: 'rm-meta' }, error),
+        h('button', { class: 'rm-btn is-sm', type: 'button', onclick: load }, t("Retry")));
+    } else if (!status) panel.replaceChildren(h('span', { class: 'rm-meta' }, t("Loading…")));
+    else if (status.active) panel.replaceChildren(h('span', { class: 'rm-meta' }, t("FPS is measured by PresentMon.")));
+    else if (status.added) panel.replaceChildren(h('span', {}, t("Sign out and sign back in, then FPS will work.")));
+    else panel.replaceChildren(
+      h('span', { class: 'rm-meta' }, t("Enable FPS once by adding your account to Performance Log Users. Windows asks for administrator approval. PresentMon does not inject into the game.")),
+      h('button', { class: 'rm-btn is-sm', type: 'button', disabled: Boolean(fpsPermissionGrant), onclick: async () => {
+        if (fpsPermissionGrant) return;
+        fpsPermissionGrant = invoke('grant_fps_permission');
+        draw();
+        try { await fpsPermissionGrant; } catch (e) { toast(e); }
+        finally { fpsPermissionGrant = null; await load(); }
+      } }, fpsPermissionGrant ? t("Waiting for administrator approval…") : t("Enable FPS measurement")));
+  };
+  async function load() {
+    error = null; status = null; draw();
+    // A newly opened inspector must also wait for an already-running UAC request.
+    if (fpsPermissionGrant) { try { await fpsPermissionGrant; } catch { /* the requesting panel reports it */ } }
+    try { status = await invoke('fps_permission'); } catch (e) { error = String(e); }
+    draw();
+  }
+  load();
+  return panel;
 }
 
 function refreshTile(k) {
@@ -569,10 +603,11 @@ function actionFields(cfg, changed, redraw, k) {
     case 'gpu':
       return [
         h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, t("Metric")),
-          h('select', { class: 'rm-select', onchange: (e) => { a.metric = e.target.value; changed(); } },
+          h('select', { class: 'rm-select', onchange: (e) => { a.metric = e.target.value; changed(); redraw(); } },
             h('optgroup', { label: t("Graphics (NVIDIA)") }, GPU_METRICS.map(([v, label]) => option(v, label, a.metric))),
             h('optgroup', { label: t("Processor and memory") }, CPU_METRICS.map(([v, label]) => option(v, label, a.metric))))),
-        h('div', { class: 'rm-meta' }, t("FPS needs RivaTuner Statistics Server; its overlay can stay off. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to cycle metrics within its group.")),
+        a.metric === 'fps' && fpsPermissionPanel(),
+        h('div', { class: 'rm-meta' }, t("FPS uses PresentMon (Windows ETW, compatible with anti-cheat); RTSS is an optional fallback. CPU temperature needs MSI Afterburner running with CPU temperature enabled in Settings → Monitoring. Press the deck key to cycle metrics within its group.")),
       ];
     case 'usage':
       return [

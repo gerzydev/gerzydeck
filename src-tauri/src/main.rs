@@ -313,6 +313,8 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            gerzys_deck::fps_permission::fps_permission,
+            gerzys_deck::fps_permission::grant_fps_permission,
             commands::get_config,
             commands::get_state,
             commands::set_config,
