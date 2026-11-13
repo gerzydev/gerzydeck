@@ -10,6 +10,7 @@ Unofficial Windows software for the **Fifine AmpliGame D6** (15 LCD keys), a rep
 - **Actions:** key or shortcut, macro, launch a program or website, media and volume, lock or sleep the PC, switch profile.
 - **Profiles:** 15 keys each, switching automatically by the program in the foreground (e.g. `wow.exe`).
 - **Stream Deck plugins:** install straight from the app, from the OpenAction catalogue and the Elgato store archive (OBS, Spotify, Discord, PC metrics and hundreds more).
+- **Unified plugin look:** plugin keys match the app’s style and keep changing with plugin state; switch back globally or per key.
 - **Soundboard:** a key plays a sound to your headphones and into your microphone at once, so people in a game or on Discord hear it too.
 - **AI usage:** keys showing your Claude and ChatGPT (Codex) plan limits and the time until they reset.
 - **Icons:** the Iconify catalogue (over 200,000 open-source icons), your own icon library and `.streamDeckIconPack` import.

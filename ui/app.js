@@ -2,7 +2,7 @@
 import { TEMPLATES, sameAction } from './templates.js';
 import { iconById, rasterizeIcon } from './icons.js';
 import { renderIconsPage, pickIcon } from './iconlib.js';
-import { renderPluginsPage, loadInstalled, pluginActionFields, pickPluginAction, closePi, pluginAction } from './plugins.js';
+import { renderPluginsPage, loadInstalled, pluginActionFields, pickPluginAction, closePi, pluginAction, pluginIcon } from './plugins.js';
 import { t, lang, setLang } from './i18n.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -150,9 +150,10 @@ function fillTile(btn, cfg, k) {
   const pa = cfg.action?.type === 'plugin' && !cfg.image ? pluginAction(cfg.action.plugin, cfg.action.action) : null;
   const soundIcon = cfg.action?.type === 'sound' && !cfg.image;
   if (soundIcon) { const icon = svgIcon(ACTION_ICONS.sound); icon.classList.add('sound-icon'); btn.append(icon); }
-  if (pa?.action?.icon) btn.append(h('img', { class: 'act-icon', src: pa.action.icon, alt: '' }));
+  const hasPluginIcon = pa?.action && (pa.action.icon || (config.pluginLook ?? true) && !cfg.originalLook);
+  if (hasPluginIcon) btn.append(pluginIcon(ui, pa.action, 'act-icon', cfg));
   if (pa && !pa.plugin) btn.append(h('span', { class: 'lbl center' }, '⚠'));
-  if (cfg.label) btn.append(h('span', { class: `lbl ${cfg.image || pa?.action?.icon || soundIcon ? 'bottom' : 'center'}` }, cfg.label));
+  if (cfg.label) btn.append(h('span', { class: `lbl ${cfg.image || hasPluginIcon || soundIcon ? 'bottom' : 'center'}` }, cfg.label));
   btn.append(h('span', { class: 'num' }, k));
 }
 
@@ -384,14 +385,14 @@ function actionGrid(cfg, onPick) {
   return h('div', { class: 'act-grid', role: 'radiogroup' },
     Object.keys(ACTION_SHORT).map((type) => {
       const active = type === current;
-      const usePluginIcon = type === 'plugin' && pa?.action?.icon;
+      const usePluginIcon = type === 'plugin' && pa?.action && (pa.action.icon || (config.pluginLook ?? true) && !cfg.originalLook);
       const name = type === 'plugin' && pa?.action ? pa.action.name : ACTION_SHORT[type];
       return h('button', {
         class: `act-tile${active ? ' active' : ''}`, type: 'button', role: 'radio', 'aria-checked': String(active),
         title: ACTION_TYPES.find(([v]) => v === type)?.[1].replace('…', '') ?? name,
         onclick: () => onPick(type),
       },
-      usePluginIcon ? h('img', { src: pa.action.icon, alt: '' }) : svgIcon(ACTION_ICONS[type]),
+      usePluginIcon ? pluginIcon(ui, pa.action, '', cfg) : svgIcon(ACTION_ICONS[type]),
       h('span', {}, name));
     }));
 }
@@ -665,6 +666,10 @@ function renderSettings() {
         setLang(config.language);
         location.reload();
       } }, option('en', 'English', config.language ?? 'en'), option('cs', 'Čeština', config.language ?? 'en'))),
+    h('div', {}, h('div', { class: 'rm-stack', style: 'gap:2px' },
+      h('b', {}, t("Unified plugin look")), h('span', { class: 'rm-meta' }, t("Plugin keys get the app's style; they still change with the plugin's state."))),
+      h('button', { class: 'rm-switch', type: 'button', role: 'switch', 'aria-label': t("Unified plugin look"), 'aria-checked': String(config.pluginLook ?? true),
+        onclick: () => { config.pluginLook = !(config.pluginLook ?? true); save(); renderSettings(); } })),
     h('div', {}, h('b', {}, t("Display brightness")),
       h('div', { class: 'rm-row' }, h('input', { type: 'range', min: 0, max: 100, value: config.brightness, oninput: (e) => { config.brightness = +e.target.value; bright.textContent = `${config.brightness} %`; save(); } }), bright)),
     h('div', {}, h('div', { class: 'rm-stack', style: 'gap:2px' }, h('b', {}, t("Start with Windows")), h('span', { class: 'rm-meta' }, t("The program starts hidden in the notification area."))), sw),
@@ -825,7 +830,7 @@ function applyTheme(choice) {
 }
 
 // ---------- boot ----------
-const ui = { h, invoke, toast, svgIcon, save: () => save(), saveNow: () => saveNow(), renderDeck: () => renderDeck() };
+const ui = { h, invoke, toast, svgIcon, getConfig: () => config, save: () => save(), saveNow: () => saveNow(), renderDeck: () => renderDeck() };
 
 async function boot() {
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);

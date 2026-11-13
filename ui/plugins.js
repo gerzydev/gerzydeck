@@ -29,6 +29,15 @@ export function pluginAction(pluginId, actionUuid) {
   return { plugin: p, action: p?.actions.find((a) => a.uuid === actionUuid) };
 }
 
+// Share icon choice across the picker, cards, action grid and key preview.
+export function pluginIcon(ui, item, className, cfg) {
+  const unified = (ui.getConfig()?.pluginLook ?? true) && !cfg?.originalLook;
+  if (!unified && !item?.icon) return null;
+  const skin = unified && item?.skinIcon;
+  const cls = [className, unified ? (skin ? 'plugin-skinned' : 'plugin-themed') : ''].filter(Boolean).join(' ');
+  return item?.icon || skin ? ui.h('img', { class: cls, src: skin || item.icon, alt: '' }) : ui.h('span', { class: cls });
+}
+
 function statusChip(ui, status) {
   const [label, tone] = STATUS[status?.kind] ?? ['?', 'warn'];
   const extra = status?.kind === 'crashed' && status.restarts ? ` (${status.restarts}×)` : '';
@@ -73,7 +82,7 @@ function draw(ui, root) {
     installedPlugins().length ? installedPlugins().map((p) => {
       const removing = pendingRemove === p.id;
       return h('div', { class: 'plug-card' },
-        h('img', { class: 'plug-icon', src: p.icon, alt: '' }),
+        pluginIcon(ui, p, 'plug-icon'),
         h('div', { class: 'plug-text' },
           h('b', {}, p.name),
           h('span', { class: 'rm-meta' }, `${p.author || ''} · ${p.version || ''}`),
@@ -97,7 +106,7 @@ function draw(ui, root) {
       h('div', { class: 'plug-grid' }, list.slice(0, q ? 200 : 60).map((e) => {
         const isIn = installedIds.has(e.id);
         return h('div', { class: 'plug-card' },
-          h('img', { class: 'plug-icon', src: e.iconUrl, alt: '', loading: 'lazy', onerror: (ev) => { ev.target.style.visibility = 'hidden'; } }),
+          pluginIcon(ui, { icon: e.iconUrl, skinIcon: installedPlugins().find((p) => p.id === e.id)?.skinIcon }, 'plug-icon'),
           h('div', { class: 'plug-text' }, h('b', {}, e.name), h('span', { class: 'rm-meta' }, e.author || '')),
           h('div', { class: 'plug-actions' },
             h('button', { class: `rm-btn is-sm ${isIn ? 'is-ghost' : ''}`, type: 'button', disabled: busy.has(e.id), onclick: () => install(ui, root, e) },
@@ -185,12 +194,12 @@ export function pickPluginAction(ui) {
         return h('div', { class: 'rm-stack', style: 'gap:4px' },
           h('button', { class: `plug-group${isOpen ? ' open' : ''}`, type: 'button', 'aria-expanded': String(isOpen),
             onclick: () => { if (open.has(p.id)) open.delete(p.id); else open.add(p.id); draw(); } },
-            h('img', { class: 'tpl-icon', src: p.icon, alt: '' }),
+            pluginIcon(ui, p, 'tpl-icon'),
             h('span', { class: 'plug-group-name' }, p.name),
             h('span', { class: 'rm-meta' }, `${actions.length}`),
             h('span', { class: 'plug-chev' }, '›')),
           isOpen && actions.map((a) => h('button', { class: 'tpl-item', type: 'button', title: a.tooltip || '', onclick: () => close({ plugin: p.id, action: a.uuid }) },
-            h('span', { class: 'tpl-name' }, h('img', { class: 'tpl-icon', src: a.icon, alt: '' }), a.name))));
+            h('span', { class: 'tpl-name' }, pluginIcon(ui, a, 'tpl-icon'), a.name))));
       }) : [
         h('div', { class: 'rm-meta' }, installedPlugins().length ? t("Nothing found.") : t("You have no plugins installed. You'll find them on the Plugins page."))]));
     };
@@ -221,7 +230,7 @@ export function pluginActionFields(ui, profileId, key, cfg, onChange) {
   const a = cfg.action;
   const { plugin, action } = pluginAction(a.plugin, a.action);
   const head = h('div', { class: 'plug-current' },
-    action?.icon ? h('img', { class: 'plug-icon', src: action.icon, alt: '' }) : null,
+    pluginIcon(ui, action, 'plug-icon', cfg),
     h('div', { class: 'plug-text' },
       h('b', {}, action?.name ?? a.action),
       h('span', { class: 'rm-meta' }, plugin ? plugin.name : t("Plugin {0} is not installed", a.plugin))),
@@ -229,7 +238,10 @@ export function pluginActionFields(ui, profileId, key, cfg, onChange) {
       const pick = await pickPluginAction(ui);
       if (pick) { cfg.action = { type: 'plugin', plugin: pick.plugin, action: pick.action, settings: {}, state: 0 }; onChange(true); }
     } }, t("Change")));
-  if (!plugin) return [head, h('div', { class: 'rm-note is-warn' }, t("The plugin is missing. Reinstall it on the Plugins page and the action and its settings come back."))];
+  const lookRow = h('div', { class: 'rm-row' }, h('span', { class: 'rm-label rm-grow' }, t("Original plugin look")),
+    h('button', { class: 'rm-switch', type: 'button', role: 'switch', 'aria-label': t("Original plugin look"), 'aria-checked': String(Boolean(cfg.originalLook)),
+      onclick: () => { cfg.originalLook = !cfg.originalLook; onChange(true); } }));
+  if (!plugin) return [head, lookRow, h('div', { class: 'rm-note is-warn' }, t("The plugin is missing. Reinstall it on the Plugins page and the action and its settings come back."))];
 
   const alignRow = h('label', { class: 'rm-field' },
     h('span', { class: 'rm-label' }, t("Value position on the key")),
@@ -246,7 +258,7 @@ export function pluginActionFields(ui, profileId, key, cfg, onChange) {
     frame.src = pi.url;
     frame.onload = () => note.remove();
   }).catch((e) => { note.textContent = String(e); frame.remove(); });
-  return [head, alignRow, note, frame];
+  return [head, lookRow, alignRow, note, frame];
 }
 
 // property inspectors report their height via postMessage (bootstrap injected by the scheme handler)

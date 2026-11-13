@@ -21,6 +21,9 @@ export function plural(n, one, many, csOne, csFew, csMany) {
 }
 
 const CS = {
+  "Unified plugin look": "Jednotný vzhled pluginů",
+  "Original plugin look": "Původní vzhled pluginu",
+  "Plugin keys get the app's style; they still change with the plugin's state.": "Klávesy pluginů mají vzhled aplikace a dál se mění podle stavu pluginu.",
   "Play while held": "Hrát, dokud držím",
   "Sound (soundboard)": "Zvuk (soundboard)",
   "Sound: {0}": "Zvuk: {0}",
