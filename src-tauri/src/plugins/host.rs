@@ -107,6 +107,7 @@ struct Host {
     global: GlobalSettings,
     device_connected: bool,
     running_apps: HashSet<String>,
+    skins: std::cell::RefCell<HashMap<String, Arc<RgbaImage>>>,
 }
 
 fn send_or_queue(tx: &Option<UnboundedSender<String>>, queue: &mut Vec<String>, msg: String) {
@@ -183,10 +184,14 @@ impl Host {
                     version: m.version.clone().unwrap_or_default(),
                     author: m.author.clone().unwrap_or_default(),
                     icon: icon_url(&m.icon),
+                    skin_icon: super::skins::plugin_icon_svg(&p.loaded.id).map(|s| super::skins::data_url(&s)),
                     status: p.status.clone(),
                     actions: m
                         .keypad_actions()
-                        .map(|a| ActionSummary { uuid: a.uuid.clone(), name: a.name.clone(), icon: icon_url(&a.icon), tooltip: a.tooltip.clone() })
+                        .map(|a| ActionSummary {
+                            uuid: a.uuid.clone(), name: a.name.clone(), icon: icon_url(&a.icon), tooltip: a.tooltip.clone(),
+                            skin_icon: super::skins::skin_svg(&p.loaded.id, &a.uuid, a.states.first().map(|s| if s.image.is_empty() { a.icon.as_str() } else { s.image.as_str() }).unwrap_or(&a.icon), true).map(|s| super::skins::data_url(&s)),
+                        })
                         .collect(),
                 }
             })
@@ -213,6 +218,22 @@ impl Host {
         }
     }
 
+    /// Static built-in SVGs are rasterised once, shared across keys and repeated state updates.
+    fn skin(&self, plugin: &str, action: &str, source: &str) -> Option<Arc<RgbaImage>> {
+        let svg = super::skins::skin_svg(plugin, action, source, false)?;
+        if let Some(image) = self.skins.borrow().get(&svg) { return Some(image.clone()); }
+        let image = Arc::new(super::image::decode_plugin_image(&super::skins::data_url(&svg), None)?);
+        self.skins.borrow_mut().insert(svg, image.clone());
+        Some(image)
+    }
+
+    fn state_skin(&self, kc: &KeyCtx, index: usize) -> Option<Arc<RgbaImage>> {
+        let p = self.plugins.get(&kc.plugin)?;
+        let a = p.loaded.manifest.actions.iter().find(|a| a.uuid == kc.ctx.action)?;
+        let state = a.states.get(index).or_else(|| a.states.first())?;
+        self.skin(&kc.plugin, &a.uuid, if state.image.is_empty() { &a.icon } else { &state.image })
+    }
+
     /// Default image of an action state from the manifest.
     /// Manifest image of one state (falls back to the action icon).
     fn state_image(&self, kc: &KeyCtx, index: usize) -> Option<RgbaImage> {
@@ -237,7 +258,7 @@ impl Host {
             .map_or(0, |a| a.states.len());
         for i in 0..count.min(16) {
             if let Some(img) = self.state_image(kc, i) {
-                self.emit(PluginEvent::SetImage { context: kc.ctx.context.clone(), image: Some(Arc::new(img)), state: Some(i as u8) });
+                self.emit(PluginEvent::SetImage { context: kc.ctx.context.clone(), image: Some(Arc::new(img)), skin: self.state_skin(kc, i), state: Some(i as u8) });
             }
         }
     }
@@ -439,16 +460,17 @@ impl Host {
                 match &image {
                     Some(src) => {
                         let decoded = (self.deps.decode_image)(src, dir.as_deref());
-                        self.emit(PluginEvent::SetImage { context, image: decoded.map(Arc::new), state });
+                        let skin = decoded.as_ref().and_then(|_| self.instances.get(&context)).and_then(|k| self.skin(id, &k.ctx.action, src));
+                        self.emit(PluginEvent::SetImage { context, image: decoded.map(Arc::new), skin, state });
                     }
                     // empty image = back to the manifest images
                     None => match (state, self.instances.get(&context).cloned()) {
                         (Some(st), Some(k)) => {
                             let img = self.state_image(&k, st as usize);
-                            self.emit(PluginEvent::SetImage { context, image: img.map(Arc::new), state: Some(st) });
+                            self.emit(PluginEvent::SetImage { context, image: img.map(Arc::new), skin: self.state_skin(&k, st as usize), state: Some(st) });
                         }
                         (None, Some(k)) => {
-                            self.emit(PluginEvent::SetImage { context, image: None, state: None });
+                            self.emit(PluginEvent::SetImage { context, image: None, skin: None, state: None });
                             self.emit_default_images(&k);
                         }
                         _ => {}
@@ -619,6 +641,7 @@ async fn run(deps: HostDeps, rx: std::sync::mpsc::Receiver<HostCmd>) {
         global,
         device_connected: false,
         running_apps: HashSet::new(),
+        skins: std::cell::RefCell::default(),
     };
     host.running_apps = (host.deps.list_processes)().into_iter().map(|n| n.to_lowercase()).collect();
     host.launch_all();

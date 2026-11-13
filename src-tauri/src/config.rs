@@ -14,6 +14,8 @@ pub const DEFAULT_BG: &str = "#141618";
 pub struct Config {
     pub version: u32,
     pub brightness: u8,
+    #[serde(default = "default_plugin_look")]
+    pub plugin_look: bool,
     pub key_map: Option<Vec<u8>>,
     pub default_profile_id: String,
     pub active_profile_id: String,
@@ -28,6 +30,8 @@ pub struct Config {
     #[serde(default = "default_mic_device")]
     pub sound_mic_device: String,
 }
+
+fn default_plugin_look() -> bool { true }
 
 fn default_language() -> String {
     "en".into()
@@ -57,11 +61,13 @@ pub struct KeyConfig {
     /// plugin keys: where the live value goes ("top" | "middle" | "bottom"); None = as the plugin says
     #[serde(default)]
     pub title_align: Option<String>,
+    #[serde(default)]
+    pub original_look: bool,
 }
 
 impl Default for KeyConfig {
     fn default() -> Self {
-        Self { image: None, label: String::new(), bg: DEFAULT_BG.into(), action: Action::None, title_align: None }
+        Self { image: None, label: String::new(), bg: DEFAULT_BG.into(), action: Action::None, title_align: None, original_look: false }
     }
 }
 
@@ -128,6 +134,7 @@ pub fn create_default_config() -> Config {
     Config {
         version: CONFIG_VERSION,
         brightness: 80,
+        plugin_look: true,
         key_map: None,
         default_profile_id: p.id.clone(),
         active_profile_id: p.id.clone(),
@@ -274,6 +281,7 @@ fn normalize_key(v: &Value) -> KeyConfig {
         label: s(&v["label"], 40),
         bg: bg.map(|b| b.to_ascii_lowercase()).unwrap_or_else(|| DEFAULT_BG.into()),
         action: normalize_action(&v["action"]),
+        original_look: v["originalLook"].as_bool().unwrap_or(false),
         title_align: v["titleAlign"].as_str().filter(|a| matches!(*a, "top" | "middle" | "bottom")).map(String::from),
     }
 }
@@ -323,6 +331,7 @@ pub fn normalize_config(raw: &Value) -> Config {
     Config {
         version: CONFIG_VERSION,
         brightness,
+        plugin_look: raw["pluginLook"].as_bool().unwrap_or(true),
         key_map: is_permutation(&raw["keyMap"]),
         default_profile_id,
         active_profile_id,
@@ -361,6 +370,29 @@ mod tests {
             }
         }
         p
+    }
+
+    #[test]
+    fn plugin_look_defaults_normalization_and_wire_format() {
+        let mut raw = serde_json::to_value(create_default_config()).unwrap();
+        assert_eq!(raw["pluginLook"], true);
+        assert_eq!(raw["profiles"][0]["keys"]["1"]["originalLook"], false);
+        raw.as_object_mut().unwrap().remove("pluginLook");
+        raw["profiles"][0]["keys"]["1"].as_object_mut().unwrap().remove("originalLook");
+        let old: Config = serde_json::from_value(raw.clone()).unwrap();
+        assert!(old.plugin_look);
+        assert!(!old.profiles[0].key(1).original_look);
+        assert!(normalize_config(&raw).plugin_look);
+        raw["pluginLook"] = serde_json::json!(false);
+        raw["profiles"][0]["keys"]["1"]["originalLook"] = serde_json::json!(true);
+        let cfg = normalize_config(&raw);
+        assert!(!cfg.plugin_look);
+        assert!(cfg.profiles[0].key(1).original_look);
+        raw["pluginLook"] = serde_json::json!("false");
+        raw["profiles"][0]["keys"]["1"]["originalLook"] = serde_json::json!(1);
+        let cfg = normalize_config(&raw);
+        assert!(cfg.plugin_look);
+        assert!(!cfg.profiles[0].key(1).original_look);
     }
 
     #[test]

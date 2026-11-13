@@ -16,7 +16,7 @@ pub use crate::store::Store;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
 
 pub trait EventSink: Send + 'static {
@@ -75,11 +75,17 @@ pub struct PluginTile {
     pub show_title: bool,
 }
 
+struct PluginImage {
+    original: Arc<RgbaImage>,
+    skin: Option<Arc<RgbaImage>>,
+    themed: OnceLock<Arc<RgbaImage>>,
+}
+
 /// Latest images/titles a plugin set for one action instance (None key = all states).
 #[derive(Default)]
 struct PluginView {
     styles: Vec<crate::plugins::link::TitleStyle>,
-    images: HashMap<Option<u8>, Arc<RgbaImage>>,
+    images: HashMap<Option<u8>, Arc<PluginImage>>,
     titles: HashMap<Option<u8>, String>,
     overlay: Option<(Overlay, Instant)>,
     gen: u64,
@@ -193,6 +199,7 @@ struct Engine {
     frame_pending: bool,
     /// decoded user images drawn under plugin titles (image id → pixels)
     user_images: HashMap<String, Arc<RgbaImage>>,
+    themed_images: HashMap<[u8; 32], Arc<RgbaImage>>,
 }
 
 impl Engine {
@@ -233,6 +240,7 @@ impl Engine {
             last_frame: HashMap::new(),
             frame_pending: false,
             user_images: HashMap::new(),
+            themed_images: HashMap::new(),
         };
         e.refresh_name();
         e.send_sound_devices();
@@ -366,6 +374,30 @@ impl Engine {
         }
     }
 
+    fn theme_cached(&mut self, source: &RgbaImage) -> Arc<RgbaImage> {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        hash.update(source.width().to_le_bytes());
+        hash.update(source.height().to_le_bytes());
+        hash.update(source.as_raw());
+        let key: [u8; 32] = hash.finalize().into();
+        if let Some(img) = self.themed_images.get(&key) { return img.clone(); }
+        let img = Arc::new(crate::plugins::image::theme_image(source));
+        // Bound retained dynamic artwork; live per-state images also retain their own result.
+        if self.themed_images.len() >= 128 { self.themed_images.clear(); }
+        self.themed_images.insert(key, img.clone());
+        img
+    }
+
+    fn plugin_image(&mut self, context: &str, state: u8, unified: bool) -> Option<Arc<RgbaImage>> {
+        let source = self.views.get(context).and_then(|v| PluginView::pick(&v.images, state));
+        if !unified { return source.map(|s| s.original.clone()); }
+        Some(match source {
+            Some(s) => s.skin.clone().unwrap_or_else(|| s.themed.get_or_init(|| self.theme_cached(&s.original)).clone()),
+            None => crate::plugins::image::theme_frame(),
+        })
+    }
+
     fn render_active(&mut self) {
         if !self.state.connected {
             return;
@@ -403,10 +435,11 @@ impl Engine {
                 }
                 continue;
             }
+            let unified = self.config.plugin_look && !cfg.original_look;
             let sound_playing = matches!(&cfg.action, Action::Sound { sound, mode, .. } if mode != "stopAll" && self.state.playing_sounds.contains(sound));
             let sig = match &plugin {
                 Some((p, state)) => format!(
-                    "P|{}|{:?}|{}|{}|{}|{:?}|{}|{:?}",
+                    "P|{}|{:?}|{}|{}|{}|{:?}|{}|{:?}|{}|{}",
                     self.views.get(&context).map_or(0, |v| v.gen),
                     cfg.image,
                     state,
@@ -414,7 +447,7 @@ impl Engine {
                     cfg.bg,
                     overlay,
                     self.missing_plugins.contains(p),
-                    cfg.title_align
+                    cfg.title_align, self.config.plugin_look, cfg.original_look
                 ),
                 None => format!("{:?}|{}|{}|{}", cfg.image, cfg.label, cfg.bg, sound_playing),
             };
@@ -428,14 +461,19 @@ impl Engine {
                         continue;
                     }
                     let own = cfg.image.as_deref().and_then(|id| self.user_image(id));
+                    let image = own.or_else(|| self.plugin_image(&context, *state, unified));
                     let view = self.views.get(&context);
                     let style = view.and_then(|v| v.styles.get(*state as usize).or_else(|| v.styles.first())).cloned().unwrap_or_default();
                     let tile = PluginTile {
-                        align: cfg.title_align.clone().or(style.align),
+                        align: cfg.title_align.clone().or(style.align).or_else(|| {
+                            if !unified { return None; }
+                            let Action::Plugin { action, .. } = &cfg.action else { return None };
+                            crate::plugins::skins::title_align(action).map(String::from)
+                        }),
                         size: style.size,
                         show_title: style.show.unwrap_or(true),
                         // the user's own image replaces the plugin image, the live title stays
-                        image: own.or_else(|| view.and_then(|v| PluginView::pick(&v.images, *state))),
+                        image,
                         title: view.and_then(|v| PluginView::pick(&v.titles, *state)),
                         label: (!cfg.label.is_empty()).then(|| cfg.label.clone()),
                         bg: parse_hex(&cfg.bg),
@@ -526,9 +564,9 @@ impl Engine {
 
     fn on_plugin(&mut self, ev: PluginEvent) {
         match ev {
-            PluginEvent::SetImage { context, image, state } => {
+            PluginEvent::SetImage { context, image, skin, state } => {
                 if let Some(v) = self.touch_view(&context) {
-                    PluginView::set(&mut v.images, state, image);
+                    PluginView::set(&mut v.images, state, image.map(|original| Arc::new(PluginImage { original, skin, themed: OnceLock::new() })));
                     self.render_active();
                 }
             }
@@ -686,6 +724,12 @@ impl Engine {
             let _ = self.device_tx.send(DeviceCmd::SetKeyMap(key_map_array(&cfg.key_map)));
         }
         let devices_changed = cfg.sound_me_device != self.config.sound_me_device || cfg.sound_mic_device != self.config.sound_mic_device;
+        // An editor look toggle must take effect immediately, outside plugin frame throttling.
+        if cfg.plugin_look != self.config.plugin_look || cfg.profiles.iter().any(|p| {
+            self.config.profiles.iter().find(|old| old.id == p.id).is_some_and(|old| {
+                p.keys.iter().any(|(k, key)| old.keys.get(k).is_some_and(|v| v.original_look != key.original_look))
+            })
+        }) { self.last_frame.clear(); }
         self.config = cfg;
         if devices_changed {
             self.send_sound_devices();
@@ -1054,6 +1098,118 @@ mod tests {
             self.state(); // notifications/rendering run after the reply
             res
         }
+    }
+
+    fn look_engine() -> (Engine, Receiver<DeviceCmd>) {
+        let store = Store::new(std::env::temp_dir().join(format!("deck-look-{}", new_id())));
+        let mut cfg = seed();
+        cfg.profiles[0].keys.get_mut("3").unwrap().action = Action::Plugin {
+            plugin: "me.amankhanna.oasystem".into(), action: "me.amankhanna.oasystem.cpu".into(), settings: json!({}), state: 0
+        };
+        store.save(&cfg).unwrap();
+        let (tx, rx) = channel();
+        let e = Engine::new(EngineDeps {
+            store, device_tx: tx, keyboard: Arc::new(FakeKb(Rec::default())),
+            launch: Arc::new(|_, _| {}), system: Arc::new(|_| {}), sink: Box::new(FakeSink(Rec::default())),
+            render, render_plugin: |t| serde_json::to_vec(&json!({
+                "align":t.align, "title":t.title,
+                "image":t.image.as_ref().map(|i| (i.dimensions(), i.get_pixel(i.width()/2, i.height()/2).0))
+            })).unwrap(),
+            render_usage: |_| vec![], usage_wake: None, sound_tx: None, host_tx: None,
+        });
+        (e, rx)
+    }
+
+    fn look_images(rx: &Receiver<DeviceCmd>) -> Vec<serde_json::Value> {
+        rx.try_iter().flat_map(|c| match c { DeviceCmd::SetImages(v) => v, _ => vec![] })
+            .filter(|(k, _)| *k == 3).map(|(_, b)| serde_json::from_slice(&b).unwrap()).collect()
+    }
+
+    #[test]
+    fn plugin_look_selects_state_skin_theme_original_and_reuses_cached_images() {
+        use image::Rgba;
+        let (mut e, _) = look_engine();
+        let original = Arc::new(RgbaImage::from_pixel(4, 4, Rgba([20, 40, 200, 255])));
+        let skin = Arc::new(RgbaImage::from_pixel(144, 144, Rgba([200, 40, 20, 255])));
+        e.on_plugin(PluginEvent::SetImage { context: "A:3".into(), image: Some(original.clone()), skin: Some(skin.clone()), state: Some(0) });
+        assert!(Arc::ptr_eq(&e.plugin_image("A:3", 0, true).unwrap(), &skin));
+        assert!(Arc::ptr_eq(&e.plugin_image("A:3", 0, false).unwrap(), &original));
+        // The next state has its own original but no skin; never inherit state zero's skin.
+        e.on_plugin(PluginEvent::SetImage { context: "A:3".into(), image: Some(original.clone()), skin: None, state: Some(1) });
+        let themed = e.plugin_image("A:3", 1, true).unwrap();
+        assert_eq!(themed.dimensions(), (144, 144));
+        assert_eq!(themed.get_pixel(72, 72).0, [20, 40, 200, 255]);
+        assert!(Arc::ptr_eq(&e.plugin_image("A:3", 1, true).unwrap(), &themed), "title-only redraws reuse the theme");
+        // A newly decoded copy with the same content also hits the bounded content cache.
+        e.on_plugin(PluginEvent::SetImage { context: "A:3".into(), image: Some(Arc::new((*original).clone())), skin: None, state: Some(1) });
+        assert!(Arc::ptr_eq(&e.plugin_image("A:3", 1, true).unwrap(), &themed));
+        assert_eq!(e.themed_images.len(), 1);
+        e.on_plugin(PluginEvent::SetImage { context: "A:3".into(), image: None, skin: None, state: None });
+        assert!(e.plugin_image("A:3", 0, false).is_none());
+        assert!(Arc::ptr_eq(&e.plugin_image("A:3", 0, true).unwrap(), &crate::plugins::image::theme_frame()));
+    }
+
+    #[test]
+    fn plugin_look_toggles_redraw_immediately_and_custom_images_win() {
+        use image::Rgba;
+        let (mut e, rx) = look_engine();
+        e.on_plugin(PluginEvent::SetImage {
+            context: "A:3".into(), image: Some(Arc::new(RgbaImage::from_pixel(4, 4, Rgba([10, 20, 30, 255])))),
+            skin: Some(Arc::new(RgbaImage::from_pixel(144, 144, Rgba([200, 90, 30, 255])))), state: None
+        });
+        e.state.connected = true;
+        e.render_active();
+        let rendered = look_images(&rx);
+        assert_eq!(rendered[0]["image"][0], json!([144, 144]));
+        assert_eq!(rendered[0]["image"][1], json!([200, 90, 30, 255]));
+        assert_eq!(rendered[0]["align"], "middle");
+        let mut raw = serde_json::to_value(&e.config).unwrap();
+        raw["pluginLook"] = json!(false);
+        e.set_config(&raw).unwrap(); e.after_config_change();
+        let rendered = look_images(&rx);
+        assert_eq!(rendered.len(), 1);
+        assert_eq!(rendered[0]["image"][0], json!([4, 4]));
+        assert!(rendered[0]["align"].is_null());
+        raw["pluginLook"] = json!(true);
+        raw["profiles"][0]["keys"]["3"]["originalLook"] = json!(true);
+        e.set_config(&raw).unwrap(); e.after_config_change();
+        assert_eq!(look_images(&rx)[0]["image"][0], json!([4, 4]));
+        raw["profiles"][0]["keys"]["3"]["originalLook"] = json!(false);
+        e.set_config(&raw).unwrap(); e.after_config_change();
+        assert_eq!(look_images(&rx)[0]["image"][0], json!([144, 144]));
+
+        let mut png = Vec::new();
+        RgbaImage::from_pixel(12, 12, Rgba([1, 250, 1, 255])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let id = e.store.save_image(&png).unwrap();
+        raw["profiles"][0]["keys"]["3"]["image"] = json!(id);
+        e.last_frame.clear();
+        e.set_config(&raw).unwrap(); e.after_config_change();
+        assert_eq!(look_images(&rx)[0]["image"][1], json!([1, 250, 1, 255]));
+    }
+
+    #[test]
+    fn plugin_look_titles_keep_changing_and_alignment_precedence_is_preserved() {
+        use crate::plugins::link::TitleStyle;
+        let (mut e, rx) = look_engine();
+        // Title-only plugins receive the frame and skin alignment fallback.
+        e.state.connected = true; e.render_active();
+        assert_eq!(look_images(&rx)[0]["align"], "middle");
+        e.last_frame.clear();
+        e.on_plugin(PluginEvent::SetTitle { context: "A:3".into(), title: Some("42%".into()), state: None });
+        let rendered = look_images(&rx);
+        assert_eq!(rendered[0]["title"], "42%");
+        assert_eq!(rendered[0]["image"][0], json!([144, 144]));
+        e.last_frame.clear();
+        e.on_plugin(PluginEvent::TitleStyle { context: "A:3".into(), styles: vec![TitleStyle { align: Some("top".into()), size: None, show: None }] });
+        assert_eq!(look_images(&rx)[0]["align"], "top");
+        e.config.profiles[0].keys.get_mut("3").unwrap().title_align = Some("bottom".into());
+        e.last_frame.clear(); e.render_active();
+        assert_eq!(look_images(&rx)[0]["align"], "bottom");
+        e.last_frame.clear();
+        e.on_plugin(PluginEvent::SetState { context: "A:3".into(), state: 1 });
+        e.last_frame.clear();
+        e.on_plugin(PluginEvent::SetTitle { context: "A:3".into(), title: Some("89%".into()), state: Some(1) });
+        assert_eq!(look_images(&rx).last().unwrap()["title"], "89%");
     }
 
     #[test]

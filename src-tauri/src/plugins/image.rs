@@ -164,6 +164,67 @@ fn svg(bytes: &[u8]) -> Option<RgbaImage> {
     RgbaImage::from_raw(144, 144, data)
 }
 
+/// Shared, rasterised base for title-only keys and the generic theme.
+pub fn theme_frame() -> Arc<RgbaImage> {
+    static FRAME: OnceLock<Arc<RgbaImage>> = OnceLock::new();
+    FRAME.get_or_init(|| Arc::new(decode_plugin_image(&super::skins::data_url(&super::skins::frame_svg()), None).expect("built-in plugin frame"))).clone()
+}
+
+/// Only sparse, neutral light glyphs qualify. Coloured logos and full pictures stay intact.
+fn monochrome_glyph(img: &RgbaImage) -> bool {
+    let mut bright = 0u64;
+    let mut neutral = 0u64;
+    let mut light = 0u64;
+    for p in img.pixels().filter(|p| p[3] >= 16) {
+        let hi = *p.0[..3].iter().max().unwrap() as u16;
+        let lo = *p.0[..3].iter().min().unwrap() as u16;
+        if hi >= 96 {
+            bright += 1;
+            if hi - lo <= hi / 6 { neutral += 1; }
+            if lo >= 160 { light += 1; }
+        }
+    }
+    let area = img.width() as u64 * img.height() as u64;
+    bright > 0 && bright * 100 <= area * 65 && neutral * 100 >= bright * 96 && light * 100 >= bright * 75
+}
+
+/// Frame any plugin image, tinting simple light glyphs while preserving coloured artwork.
+pub fn theme_image(img: &RgbaImage) -> RgbaImage {
+    let mut frame = (*theme_frame()).clone();
+    if img.width() == 0 || img.height() == 0 { return frame; }
+    let glyph = monochrome_glyph(img);
+    let mut source = img.clone();
+    if glyph {
+        // Transparent glyphs keep alpha and shading. On dark opaque backgrounds the
+        // luminance becomes the mask, removing the dark box behind the glyph.
+        let transparent = source.pixels().any(|p| p[3] < 16);
+        for p in source.pixels_mut() {
+            let level = (p[0] as u32 + p[1] as u32 + p[2] as u32) / 3;
+            if transparent {
+                p[0] = (255 * level / 255) as u8;
+                p[1] = (154 * level / 255) as u8;
+                p[2] = (60 * level / 255) as u8;
+            } else {
+                p[3] = (p[3] as u32 * level.saturating_sub(32) / 223) as u8;
+                p[0] = 255; p[1] = 154; p[2] = 60;
+            }
+        }
+    }
+    let max = source.width().max(source.height()) as u64;
+    let w = (source.width() as u64 * 104 / max).max(1) as u32;
+    let h = (source.height() as u64 * 104 / max).max(1) as u32;
+    let mut inner = image::imageops::resize(&source, w, h, FilterType::Lanczos3);
+    let r = 12.0f32.min(w.min(h) as f32 / 2.0);
+    for (x, y, p) in inner.enumerate_pixels_mut() {
+        let dx = (r - (x as f32 + 0.5)).max(0.0).max(x as f32 + 0.5 - (w as f32 - r));
+        let dy = (r - (y as f32 + 0.5)).max(0.0).max(y as f32 + 0.5 - (h as f32 - r));
+        let coverage = (r + 0.5 - dx.hypot(dy)).clamp(0.0, 1.0);
+        p[3] = (p[3] as f32 * coverage).round() as u8;
+    }
+    image::imageops::overlay(&mut frame, &inner, ((144 - w) / 2) as i64, ((144 - h) / 2) as i64);
+    frame
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Align {
     Top,
@@ -505,5 +566,59 @@ mod tests {
             .dimensions(),
             (104, 104)
         );
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+    use image::Rgba;
+    fn glyph(bg: Rgba<u8>) -> RgbaImage {
+        let mut img = RgbaImage::from_pixel(100, 100, bg);
+        for y in 30..70 { for x in 40..60 { img.put_pixel(x, y, Rgba([255; 4])); } }
+        img
+    }
+    #[test]
+    fn white_transparent_and_dark_background_glyphs_turn_orange() {
+        for bg in [Rgba([0, 0, 0, 0]), Rgba([15, 15, 15, 255])] {
+            let img = glyph(bg);
+            assert!(monochrome_glyph(&img));
+            assert_eq!(theme_image(&img).get_pixel(72, 72).0, [255, 154, 60, 255]);
+        }
+    }
+    #[test]
+    fn transparent_glyph_keeps_alpha_and_shading() {
+        let mut img = glyph(Rgba([0, 0, 0, 0]));
+        img.put_pixel(50, 50, Rgba([200, 200, 200, 128]));
+        // The sparse glyph still qualifies despite an antialiased/shaded edge.
+        assert!(monochrome_glyph(&img));
+        let themed = theme_image(&img);
+        assert!(themed.get_pixel(72, 72)[0] < 255);
+        assert!(themed.get_pixel(72, 72)[0] > 50);
+    }
+    #[test]
+    fn colourful_photo_preserves_colours_and_gets_a_frame() {
+        let img = RgbaImage::from_fn(104, 104, |x, y| Rgba([(x * 2) as u8, (y * 2) as u8, 180, 255]));
+        assert!(!monochrome_glyph(&img));
+        let themed = theme_image(&img);
+        assert_eq!(themed.dimensions(), (144, 144));
+        assert_eq!(themed.get_pixel(72, 72), img.get_pixel(52, 52));
+        assert_eq!(themed.get_pixel(45, 61), img.get_pixel(25, 41));
+        assert!(themed.get_pixel(7, 72)[0] > themed.get_pixel(7, 72)[2]);
+        assert_ne!(themed.get_pixel(20, 20), img.get_pixel(0, 0), "inner corners are clipped");
+    }
+    #[test]
+    fn coloured_logo_and_full_white_picture_are_not_recoloured() {
+        let mut img = glyph(Rgba([0; 4]));
+        for p in img.pixels_mut().filter(|p| p[3] > 0) { p[1] = 40; p[2] = 40; }
+        assert!(!monochrome_glyph(&img));
+        assert!(!monochrome_glyph(&RgbaImage::from_pixel(20, 20, Rgba([255; 4]))));
+    }
+    #[test]
+    fn empty_and_tiny_images_are_safe() {
+        for img in [RgbaImage::new(0, 0), RgbaImage::new(0, 1), RgbaImage::new(1, 0), RgbaImage::from_pixel(1, 1, Rgba([255; 4]))] {
+            assert_eq!(theme_image(&img).dimensions(), (144, 144));
+        }
+        assert!(Arc::ptr_eq(&theme_frame(), &theme_frame()));
     }
 }

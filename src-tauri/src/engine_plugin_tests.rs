@@ -206,7 +206,7 @@ fn image_flood_is_throttled_but_builtin_keys_stay_instant() {
     let t0 = Instant::now();
     for i in 0..50 {
         p.plugin(PluginEvent::SetTitle { context: "A:3".into(), title: Some(format!("{i}")), state: None });
-        p.plugin(PluginEvent::SetImage { context: "A:3".into(), image: Some(img.clone()), state: None });
+        p.plugin(PluginEvent::SetImage { skin: None, context: "A:3".into(), image: Some(img.clone()), state: None });
     }
     p.key(1, true);
     p.sync();
@@ -254,7 +254,7 @@ fn unknown_contexts_are_ignored() {
     let p = P::new();
     p.plugin(PluginEvent::SetSettings { context: "nope".into(), settings: json!({}) });
     p.plugin(PluginEvent::SetState { context: "A:1".into(), state: 1 }); // not a plugin key
-    p.plugin(PluginEvent::SetImage { context: "Z:3".into(), image: None, state: None });
+    p.plugin(PluginEvent::SetImage { skin: None, context: "Z:3".into(), image: None, state: None });
     p.sync();
     assert_eq!(p.store.load().profiles[0].key(1).action, Action::Keys { codes: vec!["KeyQ".into()] });
 }
@@ -275,7 +275,7 @@ fn user_label_and_live_plugin_title_are_both_rendered() {
     p.plugin(PluginEvent::SetTitle { context: "A:3".into(), title: Some("8%".into()), state: None });
     std::thread::sleep(Duration::from_millis(150));
     let last = p.images().into_iter().filter(|(k, _)| *k == 3).last().map(|(_, s)| s);
-    assert_eq!(last.as_deref(), Some(r#"P|Some("CPU")|Some("8%")|None|false|false"#));
+    assert_eq!(last.as_deref(), Some(r#"P|Some("CPU")|Some("8%")|None|true|false"#));
 }
 
 #[test]

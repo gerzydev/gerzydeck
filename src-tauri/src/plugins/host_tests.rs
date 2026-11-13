@@ -92,7 +92,10 @@ fn ctx(settings: Value) -> KeyCtx {
 }
 
 fn start() -> H {
-    let dir = plugins_dir();
+    start_with(plugins_dir(), decode)
+}
+
+fn start_with(dir: std::path::PathBuf, decoder: fn(&str, Option<&Path>) -> Option<image::RgbaImage>) -> H {
     let (etx, erx) = channel();
     let fake = FakeLauncher::default();
     let tx = spawn_host(HostDeps {
@@ -102,7 +105,7 @@ fn start() -> H {
             let _ = etx.send(e);
         }),
         launcher: Box::new(fake.clone()),
-        decode_image: decode,
+        decode_image: decoder,
         open_url: |_| {},
         list_processes: Vec::new,
     });
@@ -150,8 +153,8 @@ fn will_appear_sends_the_manifest_state_image_as_default() {
     let h = start();
     h.tx.send(HostCmd::WillAppear(ctx(json!({})))).unwrap();
     // one default image per manifest state, so setState(1) shows the second state's icon
-    h.wait_event(|e| matches!(e, PluginEvent::SetImage { context, image: Some(_), state: Some(0) } if context == "A:3"));
-    h.wait_event(|e| matches!(e, PluginEvent::SetImage { context, image: Some(_), state: Some(1) } if context == "A:3"));
+    h.wait_event(|e| matches!(e, PluginEvent::SetImage { context, image: Some(_), state: Some(0), .. } if context == "A:3"));
+    h.wait_event(|e| matches!(e, PluginEvent::SetImage { context, image: Some(_), state: Some(1), .. } if context == "A:3"));
 }
 
 #[test]
@@ -288,4 +291,55 @@ fn will_appear_sends_the_manifest_title_style() {
     assert_eq!(styles[0].align.as_deref(), Some("middle"));
     assert_eq!(styles[0].size, Some(17));
     assert_eq!(styles[1].show, Some(false));
+}
+
+#[test]
+fn spotify_file_images_carry_cached_skins_but_data_urls_and_unknown_files_do_not() {
+    use image::{Rgba, RgbaImage};
+    let dir = std::env::temp_dir().join(format!("gd-host-skin-{}", crate::config::new_id()));
+    let id = "com.ntanis.essentials-for-spotify";
+    let plugin = dir.join(format!("{id}.sdPlugin"));
+    std::fs::create_dir_all(plugin.join("images/states")).unwrap();
+    let manifest = json!({
+        "Name":"Spotify", "Icon":"images/states/shuffle", "CodePath":"fake.exe",
+        "Actions":[{"UUID":"spotify.shuffle","Name":"Shuffle","Icon":"images/states/shuffle",
+            "States":[{"Image":"images/states/shuffle"},{"Image":"images/states/shuffle-active"}]}]
+    });
+    std::fs::write(plugin.join("manifest.json"), manifest.to_string()).unwrap();
+    std::fs::write(plugin.join("fake.exe"), "x").unwrap();
+    for name in ["shuffle", "shuffle-active", "mode-stack-1-0-1"] {
+        RgbaImage::from_pixel(4, 4, Rgba([255, 255, 255, 255])).save(plugin.join(format!("images/states/{name}.png"))).unwrap();
+    }
+    let h = start_with(dir, super::image::decode_plugin_image);
+    let mut kc = ctx(json!({}));
+    kc.plugin = id.into(); kc.ctx.action = "spotify.shuffle".into();
+    h.tx.send(HostCmd::WillAppear(kc)).unwrap();
+    let first = h.wait_event(|e| matches!(e, PluginEvent::SetImage { image: Some(_), skin: Some(_), state: Some(0), .. }));
+    let second = h.wait_event(|e| matches!(e, PluginEvent::SetImage { image: Some(_), skin: Some(_), state: Some(1), .. }));
+    let PluginEvent::SetImage { image: Some(original), skin: Some(default), .. } = first else { unreachable!() };
+    let PluginEvent::SetImage { skin: Some(active), .. } = second else { unreachable!() };
+    assert_eq!(original.dimensions(), (4, 4));
+    assert_eq!(active.dimensions(), (144, 144));
+    assert_ne!(default, active, "state images keep their different skins");
+    h.wait_got(|v| v["event"] == "willAppear");
+    let say = |src: &str| h.fake.say.lock().unwrap().as_ref().unwrap().send(json!({
+        "event":"setImage","context":"A:3","payload":{"image":src}
+    }).to_string()).unwrap();
+    say("images/states/shuffle-active");
+    let event = h.wait_event(|e| matches!(e, PluginEvent::SetImage { state: None, .. }));
+    let PluginEvent::SetImage { image: Some(_), skin: Some(path_skin), .. } = event else { panic!("path must carry a skin") };
+    assert!(Arc::ptr_eq(&path_skin, &active), "static raster is shared with manifest state");
+    say("images/states/mode-stack-1-0-1");
+    h.wait_event(|e| matches!(e, PluginEvent::SetImage { image: Some(_), skin: None, state: None, .. }));
+    say(&super::skins::data_url(r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="white"/></svg>"#));
+    h.wait_event(|e| matches!(e, PluginEvent::SetImage { image: Some(_), skin: None, state: None, .. }));
+    let (reply, rx) = channel();
+    h.tx.send(HostCmd::ListPlugins(reply)).unwrap();
+    let list = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(list[0].skin_icon.as_ref().unwrap().starts_with("data:image/svg+xml;base64,"));
+    assert!(list[0].actions[0].skin_icon.is_some());
+    assert!(!list[0].icon.is_empty(), "original summary icon remains available");
+    let wire = serde_json::to_value(&list[0]).unwrap();
+    assert!(wire["skinIcon"].is_string() && wire["actions"][0]["skinIcon"].is_string());
+    h.tx.send(HostCmd::Shutdown).unwrap();
 }

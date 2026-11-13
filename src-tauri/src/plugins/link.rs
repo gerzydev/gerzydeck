@@ -55,6 +55,7 @@ pub struct ActionSummary {
     pub uuid: String,
     pub name: String,
     pub icon: String,
+    pub skin_icon: Option<String>,
     pub tooltip: String,
 }
 
@@ -68,6 +69,7 @@ pub struct PluginSummary {
     pub version: String,
     pub author: String,
     pub icon: String,
+    pub skin_icon: Option<String>,
     pub status: PluginStatus,
     pub actions: Vec<ActionSummary>,
 }
@@ -88,7 +90,7 @@ pub enum PluginStatus {
 /// Host → engine (wrapped in `engine::Msg::Plugin`).
 #[derive(Debug, Clone)]
 pub enum PluginEvent {
-    SetImage { context: String, image: Option<Arc<RgbaImage>>, state: Option<u8> },
+    SetImage { context: String, image: Option<Arc<RgbaImage>>, skin: Option<Arc<RgbaImage>>, state: Option<u8> },
     SetTitle { context: String, title: Option<String>, state: Option<u8> },
     SetState { context: String, state: u8 },
     SetSettings { context: String, settings: Value },
