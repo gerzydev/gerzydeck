@@ -73,10 +73,19 @@ pub fn read_fps(pid_hint: Option<u32>) -> Option<RtssFps> {
                 || info.State != MEM_COMMIT || info.Protect.0 & (PAGE_GUARD.0 | PAGE_NOACCESS.0) != 0 { return None; }
             let ptr = view.Value.cast::<u8>();
             let header: Vec<u8> = (0..HEADER_SIZE).map(|i| ptr.add(i).read_volatile()).collect();
-            let (_, _, _, end) = layout(&header)?;
-            // Bound allocation/work even if a foreign process supplied a corrupt header.
-            if end > info.RegionSize || end > 64 * 1024 * 1024 { return None; }
-            let snapshot: Vec<u8> = (0..end).map(|i| ptr.add(i).read_volatile()).collect();
+            let (stride, start, count, end) = layout(&header)?;
+            // Bound the work even if a foreign process supplied a corrupt header.
+            if end > info.RegionSize || count > 4096 { return None; }
+            // Compact snapshot: RTSS entries are many KB (frame-time buffers, OSD), only the
+            // first ENTRY_SIZE bytes of each matter, so copy those behind a rewritten header.
+            let mut snapshot = header;
+            snapshot[8..12].copy_from_slice(&(ENTRY_SIZE as u32).to_le_bytes());
+            snapshot[12..16].copy_from_slice(&(HEADER_SIZE as u32).to_le_bytes());
+            snapshot.reserve(count * ENTRY_SIZE);
+            for i in 0..count {
+                let entry = ptr.add(start + i * stride);
+                snapshot.extend((0..ENTRY_SIZE).map(|j| entry.add(j).read_volatile()));
+            }
             parse(&snapshot, pid_hint, GetTickCount())
         })();
         if !view.Value.is_null() { let _ = UnmapViewOfFile(view); }
