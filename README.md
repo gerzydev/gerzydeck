@@ -35,7 +35,7 @@ The program lives in the notification area (tray). Click the icon to open the ed
 ## Installation
 
 1. Quit **fifine Control Deck** (including its tray icon) and disable its autostart, otherwise both apps fight over the deck.
-2. Run `Gerzys Deck_<version>_x64-setup.exe` and accept the license terms.
+2. Download the installer from [Releases](https://github.com/gerzydev/gerzydeck/releases/latest), run it and accept the license terms. It is not code-signed, so Windows SmartScreen may ask you to confirm (**More info → Run anyway**).
 3. In the editor, open **Settings** and turn on "Start with Windows".
 
 Settings, images, icons and plugins are stored in `%APPDATA%\GerzysDeck`.
