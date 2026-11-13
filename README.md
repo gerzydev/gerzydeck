@@ -12,7 +12,7 @@ Unofficial Windows software for the **Fifine AmpliGame D6** (15 LCD keys), a rep
 - **Stream Deck plugins:** install straight from the app, from the OpenAction catalogue and the Elgato store archive (OBS, Spotify, Discord, PC metrics and hundreds more).
 - **Unified plugin look:** plugin keys match the app’s style and keep changing with plugin state; switch back globally or per key.
 - **Soundboard:** a key plays a sound to your headphones and into your microphone at once, so people in a game or on Discord hear it too.
-- **GPU monitor:** NVIDIA load, temperature, VRAM, power, core clock and fan speed via NVML, plus game FPS via RTSS; press the key to cycle metrics.
+- **Performance monitor:** CPU load and RAM from Windows, CPU temperature from MSI Afterburner, NVIDIA metrics via NVML and game FPS via RTSS; press the key to cycle metrics within its group.
 - **AI usage:** keys showing your Claude and ChatGPT (Codex) plan limits and the time until they reset.
 - **Icons:** the Iconify catalogue (over 200,000 open-source icons), your own icon library and `.streamDeckIconPack` import.
 - **Boot logo:** your own 800 × 480 image shown when the deck is plugged in.
@@ -51,9 +51,11 @@ Assign a Sound action to play MP3, WAV, OGG or FLAC files (up to 50 MB), with se
 
 To send sound into a game or Discord, use a virtual microphone. SteelSeries Sonar's “Microphone” playback device works out of the box with Auto. Alternatively, install the free VB-Audio Virtual Cable or Voicemeeter, pick its playback device in Settings → Soundboard, and select the corresponding virtual microphone in your game or Discord. Turn off Discord/Krisp noise suppression if it filters the sound.
 
-## GPU monitor
+## Performance monitor
 
-Assign a **GPU monitor (NVIDIA)** action and choose the initial metric. NVIDIA readings use NVML from the installed NVIDIA driver. The key cycles through FPS, GPU load, temperature, VRAM, power, core clock and fan speed when pressed; unavailable readings show a dash.
+Assign a **Performance monitor (GPU, CPU, RAM)** action and choose its initial metric. **Graphics (NVIDIA)** includes FPS, GPU load, temperature, VRAM, power, core clock and fan speed. **Processor and memory** includes CPU load, CPU temperature and RAM. Pressing the key cycles within the selected group. Unavailable readings show a dash; RAM and VRAM show used/total GB with one decimal place.
+
+CPU load and RAM come directly from Windows and work without an NVIDIA card. CPU temperature requires **MSI Afterburner** running with **CPU temperature** enabled under **Settings → Monitoring**; the hottest reported CPU sensor is shown. NVIDIA readings use NVML from the installed NVIDIA driver.
 
 FPS requires **RivaTuner Statistics Server (RTSS)** running in the background. Its on-screen display (OSD) can stay off. Set **Application detection level** to something other than **None** for games you want to monitor. To exclude a game from RTSS, add its executable as a separate RTSS profile and set that profile's detection level to **None**.
 
