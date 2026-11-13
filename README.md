@@ -20,13 +20,17 @@ Unofficial Windows software for the **Fifine AmpliGame D6** (15 LCD keys), a rep
 
 The program lives in the notification area (tray). Click the icon to open the editor; closing the window keeps it running.
 
-| Plugins | Icons |
+| Performance monitor | Plugins |
 | --- | --- |
-| ![Plugins](docs/screenshots/plugins.png) | ![Icons](docs/screenshots/icons.png) |
+| ![Performance monitor](docs/screenshots/monitor.png) | ![Plugins](docs/screenshots/plugins.png) |
 
-| Settings | Boot logo |
+| Icons | Settings |
 | --- | --- |
-| ![Settings](docs/screenshots/settings.png) | ![Boot logo](docs/screenshots/boot-logo.png) |
+| ![Icons](docs/screenshots/icons.png) | ![Settings](docs/screenshots/settings.png) |
+
+| Boot logo |
+| --- |
+| ![Boot logo](docs/screenshots/boot-logo.png) |
 
 ## Installation
 
