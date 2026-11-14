@@ -29,6 +29,9 @@ pub struct Config {
     /// soundboard output into the microphone: "auto" (Sonar / VB-Cable / Voicemeeter), "none", or a device name
     #[serde(default = "default_mic_device")]
     pub sound_mic_device: String,
+    /// physical microphone (capture device name) muted while a sound plays into the microphone; "" = off
+    #[serde(default)]
+    pub sound_mute_mic: String,
 }
 
 fn default_plugin_look() -> bool { true }
@@ -149,6 +152,7 @@ pub fn create_default_config() -> Config {
         language: default_language(),
         sound_me_device: String::new(),
         sound_mic_device: default_mic_device(),
+        sound_mute_mic: String::new(),
     }
 }
 
@@ -356,6 +360,7 @@ pub fn normalize_config(raw: &Value) -> Config {
         language: if raw["language"].as_str() == Some("cs") { "cs".into() } else { default_language() },
         sound_me_device: s(&raw["soundMeDevice"], 200),
         sound_mic_device: raw["soundMicDevice"].as_str().filter(|d| !d.is_empty()).map(|d| d.chars().take(200).collect()).unwrap_or_else(default_mic_device),
+        sound_mute_mic: s(&raw["soundMuteMic"], 200),
     }
 }
 
@@ -468,6 +473,9 @@ mod tests {
         assert_eq!((n.sound_me_device.as_str(), n.sound_mic_device.as_str()), ("Sluchátka (ASUS XONAR U5)", "none"));
         raw.as_object_mut().unwrap().remove("soundMicDevice");
         assert_eq!(normalize_config(&raw).sound_mic_device, "auto", "older configs get auto");
+        assert_eq!(normalize_config(&raw).sound_mute_mic, "", "muting the microphone is off by default");
+        raw["soundMuteMic"] = json!("Mikrofon (HyperX QuadCast)");
+        assert_eq!(normalize_config(&raw).sound_mute_mic, "Mikrofon (HyperX QuadCast)");
     }
 
     #[test]
