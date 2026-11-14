@@ -12,6 +12,8 @@ pub const ACCENT: &str = "#ff9a3c";
 pub const RED: &str = "#ff6b6b";
 pub const GREEN: &str = "#5dde89";
 pub const GREY: &str = "#6b7078";
+/// Spotify brand green (the play key while Spotify runs)
+pub const BRAND_SPOTIFY: &str = "#1db954";
 
 /// Normalises a plugin image reference: "./actions/mute_0@2x.png" → "actions/mute_0".
 fn base(image: &str) -> String {
@@ -26,6 +28,7 @@ fn badge_colors(state: &str) -> (&'static str, &'static str, &'static str) {
         RED => ("#8a2020", "#430b0b", "#d0504a"),
         GREEN => ("#1f6b3a", "#0c3119", "#4cc97a"),
         GREY => ("#3b3e43", "#1d1f22", "#6b7078"),
+        BRAND_SPOTIFY => ("#1f8f4a", "#0c4422", "#3ddc78"),
         _ => ("#8f5a19", "#4a2a08", "#d9a040"),
     }
 }
@@ -253,6 +256,16 @@ fn spotify_file(file: &str, size: Size) -> Option<String> {
         }
     }
     let (name, unknown) = name.strip_suffix("-unknown").map_or((name, false), |n| (n, true));
+    // the play / now-playing key without album art: Spotify green badge with the logo
+    if name == "context-information" {
+        let rim = badge_colors(BRAND_SPOTIFY).2;
+        let under = format!(r#"<path transform="translate(-14 58) scale(4.2)" d="{SPOTIFY_LOGO}" fill="{rim}" fill-opacity="0.10"/>"#);
+        let logo = match size {
+            Size::Key => format!(r##"<path transform="translate(50 34) scale(1.84)" d="{SPOTIFY_LOGO}" fill="#ffffff"/>"##),
+            Size::List => format!(r##"<path transform="translate(36 36) scale(3)" d="{SPOTIFY_LOGO}" fill="#ffffff"/>"##),
+        };
+        return Some(badge_tile(BRAND_SPOTIFY, "", size, if size == Size::Key { &under } else { "" }, &logo));
+    }
     let repeat_one = format!("{REPEAT}{ONE}");
     let vol_up = format!(r#"{SPEAKER_BODY}<path d="M14.5 12h6M17.5 9v6"/>"#);
     let vol_down = format!(r#"{SPEAKER_BODY}<path d="M14.5 12h6"/>"#);
