@@ -55,6 +55,8 @@ Assign a Sound action to play MP3, WAV, OGG or FLAC files (up to 50 MB), with se
 
 To send sound into a game or Discord, use a virtual microphone. SteelSeries Sonar's “Microphone” playback device works out of the box with Auto. Alternatively, install the free VB-Audio Virtual Cable or Voicemeeter, pick its playback device in Settings → Soundboard, and select the corresponding virtual microphone in your game or Discord. Turn off Discord/Krisp noise suppression if it filters the sound.
 
+**Mute microphone while playing** (Settings → Soundboard) mutes your physical microphone in Windows while a sound plays into the virtual one, so people hear only the sound, and turns it back on when the last sound ends. A microphone you had already muted stays muted. If the app is closed unexpectedly while the microphone is muted, it is unmuted on the next start.
+
 ## Performance monitor
 
 Assign a **Performance monitor (GPU, CPU, RAM)** action and choose up to three different metric slots from any group. **Frames (PresentMon)** includes FPS, frame time, 1% low FPS, display latency, click latency and a CPU/GPU bottleneck label. **Graphics (NVIDIA)** includes GPU load, temperature, VRAM, power, core clock and fan speed. **Processor and memory** includes CPU load, CPU temperature and RAM. Slot 1 is shown at startup. Pressing the key cycles only between the selected slots; with one slot, pressing leaves it unchanged. Unavailable readings show a dash; RAM and VRAM show used/total GB with one decimal place.
