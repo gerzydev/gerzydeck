@@ -189,6 +189,22 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
     });
     *engine_slot.lock().unwrap() = Some(engine_tx.clone());
 
+    // Spotify keys show an offline tile (and start Spotify on press) while the app is closed
+    let spotify_tx = engine_tx.clone();
+    std::thread::Builder::new().name("spotify-watch".into()).spawn(move || {
+        let mut last = None;
+        loop {
+            let running = os::list_process_names().iter().any(|p| p.eq_ignore_ascii_case("spotify.exe"));
+            if last != Some(running) {
+                last = Some(running);
+                if spotify_tx.send(Msg::SpotifyRunning(running)).is_err() {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(800));
+        }
+    })?;
+
     // GPU monitor keys: NVML + RTSS, read once a second while such a key is on the deck
     let gpu_tx = engine_tx.clone();
     let presentmon = app.path().resource_dir().ok().map(|d| d.join("presentmon").join("PresentMon.exe"));
