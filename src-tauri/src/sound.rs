@@ -89,7 +89,7 @@ pub enum Mode {
 pub trait Voice {
     fn done(&self) -> bool;
     /// this copy plays into the (virtual) microphone
-    fn into_mic(&self) -> bool {
+    fn plays_into_mic(&self) -> bool {
         false
     }
 }
@@ -166,7 +166,7 @@ impl<B: Backend> Player<B> {
     /// Mutes the physical microphone while any sound plays into the virtual one, and unmutes it
     /// (only if we muted it) once the last such sound has ended or was stopped.
     fn sync_mic(&mut self) {
-        let live = self.playing.values().flatten().any(|v| v.into_mic() && !v.done());
+        let live = self.playing.values().flatten().any(|v| v.plays_into_mic() && !v.done());
         match (&self.mic, live) {
             (MicState::Idle, true) => {
                 self.mic = if self.mute_device.is_empty() {
@@ -292,7 +292,7 @@ impl Voice for SinkVoice {
     fn done(&self) -> bool {
         self.0.empty()
     }
-    fn into_mic(&self) -> bool {
+    fn plays_into_mic(&self) -> bool {
         self.1
     }
 }
@@ -406,7 +406,7 @@ mod tests {
         fn done(&self) -> bool {
             !*self.0.borrow()
         }
-        fn into_mic(&self) -> bool {
+        fn plays_into_mic(&self) -> bool {
             self.1
         }
     }
