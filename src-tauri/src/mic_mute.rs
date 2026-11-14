@@ -96,11 +96,20 @@ fn endpoint(name: &str) -> Result<IAudioEndpointVolume, String> {
         .ok_or_else(|| format!("Capture device not found: {name}"))?;
     unsafe { device.Activate(CLSCTX_ALL, None).map_err(|e| e.to_string()) }
 }
+/// Capture sides of the virtual microphones the soundboard plays into: muting one of them would
+/// silence the soundboard itself, so they are not offered.
+const VIRTUAL_CAPTURE: [&str; 4] = ["Sonar - Microphone", "CABLE Output", "VoiceMeeter Out", "Voicemeeter Out"];
+
+fn physical(name: &str) -> bool {
+    !VIRTUAL_CAPTURE.iter().any(|v| name.contains(v))
+}
+
+/// Physical microphones (virtual soundboard microphones left out).
 pub fn list_inputs() -> Vec<String> {
     let result = (|| {
         let _com = Com::init()?;
         inputs()
-            .map(|v| v.into_iter().map(|(n, _)| n).collect())
+            .map(|v| v.into_iter().map(|(n, _)| n).filter(|n| physical(n)).collect())
             .map_err(|e| e.to_string())
     })();
     result.unwrap_or_else(|e| {
@@ -136,9 +145,12 @@ pub fn unmute(data_dir: &Path, name: &str) -> Result<(), String> {
 pub fn restore_after_crash(data_dir: &Path) {
     match read_marker(data_dir) {
         Ok(Some(marker)) => {
+            // on success `unmute` removes the marker; on failure (microphone unplugged right now)
+            // it stays, so the next start tries again
             if let Err(e) = unmute(data_dir, &marker.device) {
-                log::warn!("Cannot restore microphone: {e}");
+                log::warn!("Cannot restore microphone {}: {e}", marker.device);
             }
+            return;
         }
         Ok(None) => return,
         Err(e) => log::warn!("Cannot read microphone recovery marker: {e}"),
@@ -179,6 +191,14 @@ mod tests {
         remove_marker(&dir).unwrap();
         fs::remove_dir(&dir).unwrap();
     }
+    #[test]
+    fn virtual_microphones_are_not_offered() {
+        assert!(!physical("SteelSeries Sonar - Microphone (SteelSeries Sonar Virtual Audio Device)"));
+        assert!(!physical("CABLE Output (VB-Audio Virtual Cable)"));
+        assert!(!physical("VoiceMeeter Output (VB-Audio VoiceMeeter VAIO)"));
+        assert!(physical("Mikrofon (USB PnP Audio Device)"));
+    }
+
     #[test]
     #[ignore = "Lists live capture devices; never changes mute state"]
     fn list_live_inputs() {
