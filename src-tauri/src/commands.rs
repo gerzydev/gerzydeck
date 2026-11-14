@@ -119,6 +119,11 @@ pub async fn list_audio_outputs() -> Vec<String> {
     crate::sound::list_outputs()
 }
 
+#[tauri::command]
+pub async fn list_audio_inputs() -> Vec<String> {
+    crate::mic_mute::list_inputs()
+}
+
 /// The device "auto" picks for the microphone right now.
 #[tauri::command]
 pub async fn auto_mic_device() -> Option<String> {

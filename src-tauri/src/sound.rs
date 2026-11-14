@@ -49,7 +49,7 @@ pub fn import(data_dir: &Path, bytes: &[u8]) -> Result<String, String> {
     }
     let unsupported = || tr("Tenhle formát neumím přehrát. Použij MP3, WAV, OGG nebo FLAC.", "Can't play this format. Use MP3, WAV, OGG or FLAC.").to_string();
     let ext = sniff(bytes).ok_or_else(unsupported)?;
-    rodio::Decoder::new(std::io::Cursor::new(bytes.to_vec())).map_err(|_| unsupported())?;
+    crate::sound_decode::open(std::io::Cursor::new(bytes.to_vec()), ext).map_err(|_| unsupported())?;
     let hash = Sha256::digest(bytes);
     let id = format!("{}.{ext}", hash[..8].iter().map(|b| format!("{b:02x}")).collect::<String>());
     let dir = sounds_dir(data_dir);
@@ -71,7 +71,8 @@ pub enum SoundCmd {
     StopAll,
     /// `me`: "" = Windows default output, else a device name.
     /// `mic`: "auto" = first virtual microphone found, "none" = off, else a device name.
-    SetDevices { me: String, mic: String },
+    /// `mute_mic`: physical microphone muted while a sound plays into `mic`; "" = off.
+    SetDevices { me: String, mic: String, mute_mic: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -87,6 +88,48 @@ pub enum Mode {
 /// One playing copy of a sound on one output; dropping it stops it.
 pub trait Voice {
     fn done(&self) -> bool;
+    /// this copy plays into the (virtual) microphone
+    fn plays_into_mic(&self) -> bool {
+        false
+    }
+}
+
+/// Mutes / unmutes the physical microphone (see `mic_mute`).
+pub trait MicMuter {
+    /// Ok(true) = muted by this call (undo later), Ok(false) = it already was muted
+    fn mute(&mut self, device: &str) -> Result<bool, String>;
+    fn unmute(&mut self, device: &str) -> Result<(), String>;
+}
+
+struct NoMuter;
+impl MicMuter for NoMuter {
+    fn mute(&mut self, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn unmute(&mut self, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+struct SystemMuter(PathBuf);
+impl MicMuter for SystemMuter {
+    fn mute(&mut self, device: &str) -> Result<bool, String> {
+        crate::mic_mute::mute(&self.0, device)
+    }
+    fn unmute(&mut self, device: &str) -> Result<(), String> {
+        crate::mic_mute::unmute(&self.0, device)
+    }
+}
+
+/// What the player did to the physical microphone during the current stretch of playback.
+#[derive(Debug, Clone, PartialEq)]
+enum MicState {
+    /// nothing plays into the microphone
+    Idle,
+    /// we muted this device and unmute it when the microphone goes quiet
+    Muted(String),
+    /// sound goes into the microphone, but muting is off, failed, or the device already was muted
+    Untouched,
 }
 
 pub trait Backend {
@@ -106,11 +149,50 @@ pub struct Player<B: Backend> {
     dir: PathBuf,
     playing: HashMap<String, Vec<Box<dyn Voice>>>,
     reported: HashSet<String>,
+    muter: Box<dyn MicMuter>,
+    mute_device: String,
+    mic: MicState,
 }
 
 impl<B: Backend> Player<B> {
     pub fn new(backend: B, dir: PathBuf) -> Self {
-        Self { backend, dir, playing: HashMap::new(), reported: HashSet::new() }
+        Self::with_muter(backend, dir, Box::new(NoMuter))
+    }
+
+    pub fn with_muter(backend: B, dir: PathBuf, muter: Box<dyn MicMuter>) -> Self {
+        Self { backend, dir, playing: HashMap::new(), reported: HashSet::new(), muter, mute_device: String::new(), mic: MicState::Idle }
+    }
+
+    /// Mutes the physical microphone while any sound plays into the virtual one, and unmutes it
+    /// (only if we muted it) once the last such sound has ended or was stopped.
+    fn sync_mic(&mut self) {
+        let live = self.playing.values().flatten().any(|v| v.plays_into_mic() && !v.done());
+        match (&self.mic, live) {
+            (MicState::Idle, true) => {
+                self.mic = if self.mute_device.is_empty() {
+                    MicState::Untouched
+                } else {
+                    match self.muter.mute(&self.mute_device) {
+                        Ok(true) => MicState::Muted(self.mute_device.clone()),
+                        Ok(false) => MicState::Untouched,
+                        Err(e) => {
+                            log::warn!("cannot mute the microphone {}: {e}", self.mute_device);
+                            MicState::Untouched
+                        }
+                    }
+                };
+            }
+            (MicState::Muted(_) | MicState::Untouched, false) => self.release_mic(),
+            _ => {}
+        }
+    }
+
+    fn release_mic(&mut self) {
+        if let MicState::Muted(device) = std::mem::replace(&mut self.mic, MicState::Idle) {
+            if let Err(e) = self.muter.unmute(&device) {
+                log::warn!("cannot unmute the microphone {device}: {e}");
+            }
+        }
     }
 
     pub fn is_playing(&self, sound: &str) -> bool {
@@ -120,6 +202,7 @@ impl<B: Backend> Player<B> {
     /// Reap ended voices and report transitions; a sound finishes after both outputs finish.
     pub fn poll(&mut self) -> Vec<(String, bool)> {
         self.playing.retain(|_, v| v.iter().any(|x| !x.done()));
+        self.sync_mic();
         let current: HashSet<String> = self.playing.keys().cloned().collect();
         let mut events: Vec<_> = self.reported.difference(&current).map(|s| (s.clone(), false)).collect();
         events.extend(current.difference(&self.reported).map(|s| (s.clone(), true)));
@@ -128,12 +211,19 @@ impl<B: Backend> Player<B> {
     }
 
     pub fn handle(&mut self, cmd: SoundCmd) {
+        self.handle_cmd(cmd);
+        self.sync_mic();
+    }
+
+    fn handle_cmd(&mut self, cmd: SoundCmd) {
         self.playing.retain(|_, v| v.iter().any(|x| !x.done()));
         match cmd {
             SoundCmd::Stop { sound } => { self.playing.remove(&sound); }
             SoundCmd::StopAll => self.playing.clear(),
-            SoundCmd::SetDevices { me, mic } => {
+            SoundCmd::SetDevices { me, mic, mute_mic } => {
                 self.playing.clear();
+                self.release_mic();
+                self.mute_device = mute_mic;
                 self.backend.set_devices(&me, &mic);
             }
             SoundCmd::Press { sound, me, mic, mode } => {
@@ -155,6 +245,12 @@ impl<B: Backend> Player<B> {
                 }
             }
         }
+    }
+}
+
+impl<B: Backend> Drop for Player<B> {
+    fn drop(&mut self) {
+        self.release_mic();
     }
 }
 
@@ -191,10 +287,13 @@ fn open(name: &str) -> Option<Out> {
     }
 }
 
-struct SinkVoice(rodio::Sink);
+struct SinkVoice(rodio::Sink, bool);
 impl Voice for SinkVoice {
     fn done(&self) -> bool {
         self.0.empty()
+    }
+    fn plays_into_mic(&self) -> bool {
+        self.1
     }
 }
 
@@ -220,7 +319,7 @@ impl Rodio {
         (me, mic)
     }
 
-    fn play_on(out: &mut Option<Out>, want: Option<String>, path: &Path, volume: f32) -> Option<Box<dyn Voice>> {
+    fn play_on(out: &mut Option<Out>, want: Option<String>, path: &Path, volume: f32, into_mic: bool) -> Option<Box<dyn Voice>> {
         let want = want?;
         if volume <= 0.0 {
             return None;
@@ -229,7 +328,8 @@ impl Rodio {
             *out = open(&want);
         }
         let file = std::fs::File::open(path).ok()?;
-        let source = rodio::Decoder::new(std::io::BufReader::new(file)).map_err(|e| log::warn!("cannot decode {}: {e}", path.display())).ok()?;
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        let source = crate::sound_decode::open(file, ext).map_err(|e| log::warn!("cannot decode {}: {e}", path.display())).ok()?;
         let sink = match rodio::Sink::try_new(&out.as_ref()?.handle) {
             Ok(s) => s,
             Err(_) => {
@@ -240,14 +340,14 @@ impl Rodio {
         };
         sink.set_volume(volume);
         sink.append(source);
-        Some(Box::new(SinkVoice(sink)))
+        Some(Box::new(SinkVoice(sink, into_mic)))
     }
 }
 
 impl Backend for Rodio {
     fn start(&mut self, path: &Path, me: f32, mic: f32) -> Vec<Box<dyn Voice>> {
         let (want_me, want_mic) = self.wanted();
-        [Self::play_on(&mut self.me, want_me, path, me), Self::play_on(&mut self.mic, want_mic, path, mic)].into_iter().flatten().collect()
+        [Self::play_on(&mut self.me, want_me, path, me, false), Self::play_on(&mut self.mic, want_mic, path, mic, true)].into_iter().flatten().collect()
     }
 
     fn set_devices(&mut self, me: &str, mic: &str) {
@@ -280,8 +380,9 @@ fn run_player<B: Backend>(player: &mut Player<B>, rx: Receiver<SoundCmd>, report
 pub fn spawn_player(data_dir: &Path, mut report: impl FnMut(String, bool) + Send + 'static) -> Sender<SoundCmd> {
     let (tx, rx): (Sender<SoundCmd>, Receiver<SoundCmd>) = channel();
     let dir = sounds_dir(data_dir);
+    let data = data_dir.to_path_buf();
     let _ = std::thread::Builder::new().name("sound".into()).spawn(move || {
-        let mut player = Player::new(Rodio { mic_choice: "auto".into(), ..Rodio::default() }, dir);
+        let mut player = Player::with_muter(Rodio { mic_choice: "auto".into(), ..Rodio::default() }, dir, Box::new(SystemMuter(data)));
         run_player(&mut player, rx, &mut report);
     });
     tx
@@ -300,10 +401,13 @@ mod tests {
         devices: Vec<(String, String)>,
     }
 
-    struct FakeVoice(Rc<RefCell<bool>>);
+    struct FakeVoice(Rc<RefCell<bool>>, bool);
     impl Voice for FakeVoice {
         fn done(&self) -> bool {
             !*self.0.borrow()
+        }
+        fn plays_into_mic(&self) -> bool {
+            self.1
         }
     }
     impl Drop for FakeVoice {
@@ -319,7 +423,7 @@ mod tests {
             log.started.push((path.file_name().unwrap().to_string_lossy().into_owned(), me, mic));
             let alive = Rc::new(RefCell::new(true));
             log.live.push(alive.clone());
-            vec![Box::new(FakeVoice(alive))]
+            vec![Box::new(FakeVoice(alive, mic > 0.0))]
         }
         fn set_devices(&mut self, me: &str, mic: &str) {
             self.0.borrow_mut().devices.push((me.into(), mic.into()));
@@ -385,7 +489,7 @@ mod tests {
         p.handle(SoundCmd::StopAll);
         assert!(!p.is_playing(A));
         p.handle(press(Mode::Toggle));
-        p.handle(SoundCmd::SetDevices { me: String::new(), mic: "none".into() });
+        p.handle(SoundCmd::SetDevices { me: String::new(), mic: "none".into(), mute_mic: String::new() });
         assert!(!p.is_playing(A));
         assert_eq!(log.borrow().devices, vec![(String::new(), "none".to_string())]);
     }
@@ -469,7 +573,7 @@ mod tests {
         let (mut p, log) = player();
         p.handle(press(Mode::Hold));
         let second = Rc::new(RefCell::new(true));
-        p.playing.get_mut(A).unwrap().push(Box::new(FakeVoice(second.clone())));
+        p.playing.get_mut(A).unwrap().push(Box::new(FakeVoice(second.clone(), true)));
         assert_eq!(p.poll(), vec![(A.into(), true)]);
         *log.borrow().live[0].borrow_mut() = false;
         assert!(p.poll().is_empty(), "microphone still playing");
@@ -479,10 +583,94 @@ mod tests {
         assert!(p.poll().is_empty());
     }
 
+    /// Records mute / unmute calls; `already` = the device is muted before we touch it.
+    struct FakeMuter { calls: Rc<RefCell<Vec<String>>>, already: bool, fail: bool }
+    impl MicMuter for FakeMuter {
+        fn mute(&mut self, device: &str) -> Result<bool, String> {
+            self.calls.borrow_mut().push(format!("mute {device}"));
+            if self.fail { Err("gone".into()) } else { Ok(!self.already) }
+        }
+        fn unmute(&mut self, device: &str) -> Result<(), String> {
+            self.calls.borrow_mut().push(format!("unmute {device}"));
+            Ok(())
+        }
+    }
+
+    fn muting_player(already: bool, fail: bool) -> (Player<Fake>, Rc<RefCell<Log>>, Rc<RefCell<Vec<String>>>) {
+        let d = dir();
+        std::fs::write(d.join(A), b"x").unwrap();
+        std::fs::write(d.join(B), b"x").unwrap();
+        let log = Rc::new(RefCell::new(Log::default()));
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut p = Player::with_muter(Fake(log.clone()), d, Box::new(FakeMuter { calls: calls.clone(), already, fail }));
+        p.handle(SoundCmd::SetDevices { me: "".into(), mic: "auto".into(), mute_mic: "Mic".into() });
+        (p, log, calls)
+    }
+
+    const B: &str = "fedcba9876543210.wav";
+    fn press_b(mic: u8) -> SoundCmd {
+        SoundCmd::Press { sound: B.into(), me: 100, mic, mode: Mode::Toggle }
+    }
+
+    #[test]
+    fn mic_is_muted_while_sounds_play_into_it_and_unmuted_after_the_last_one() {
+        let (mut p, log, calls) = muting_player(false, false);
+        p.handle(press(Mode::Toggle));
+        p.handle(press_b(80));
+        assert_eq!(*calls.borrow(), vec!["mute Mic"], "muted once for overlapping sounds");
+        *log.borrow().live[0].borrow_mut() = false; // A ended on its own
+        p.poll();
+        assert_eq!(calls.borrow().len(), 1, "B still plays into the microphone");
+        p.handle(press_b(80)); // toggle B off
+        assert_eq!(*calls.borrow(), vec!["mute Mic", "unmute Mic"]);
+        p.handle(press(Mode::Toggle));
+        *log.borrow().live[1].borrow_mut() = false;
+        *log.borrow().live[2].borrow_mut() = false;
+        p.poll();
+        assert_eq!(*calls.borrow(), vec!["mute Mic", "unmute Mic", "mute Mic", "unmute Mic"], "natural end unmutes too");
+    }
+
+    #[test]
+    fn sounds_only_for_me_and_disabled_muting_leave_the_mic_alone() {
+        let (mut p, _, calls) = muting_player(false, false);
+        p.handle(press_b(0)); // editor preview / mic volume 0: nothing goes into the microphone
+        assert!(calls.borrow().is_empty());
+        p.handle(SoundCmd::StopAll);
+        p.handle(SoundCmd::SetDevices { me: "".into(), mic: "auto".into(), mute_mic: "".into() });
+        p.handle(press(Mode::Toggle));
+        assert!(calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_mic_muted_by_someone_else_or_a_failure_is_never_unmuted() {
+        for (already, fail) in [(true, false), (false, true)] {
+            let (mut p, _, calls) = muting_player(already, fail);
+            p.handle(press(Mode::Toggle));
+            p.handle(press(Mode::Toggle));
+            p.handle(press(Mode::Toggle));
+            assert_eq!(*calls.borrow(), vec!["mute Mic", "mute Mic"], "tried once per stretch, never unmuted");
+        }
+    }
+
+    #[test]
+    fn stop_all_device_change_and_drop_unmute() {
+        let (mut p, _, calls) = muting_player(false, false);
+        p.handle(press(Mode::Toggle));
+        p.handle(SoundCmd::StopAll);
+        assert_eq!(calls.borrow().last().unwrap(), "unmute Mic");
+        p.handle(press(Mode::Toggle));
+        p.handle(SoundCmd::SetDevices { me: "".into(), mic: "auto".into(), mute_mic: "Other mic".into() });
+        assert_eq!(calls.borrow().last().unwrap(), "unmute Mic", "the old device is restored when the setting changes");
+        p.handle(press(Mode::Toggle));
+        assert_eq!(calls.borrow().last().unwrap(), "mute Other mic");
+        drop(p);
+        assert_eq!(calls.borrow().last().unwrap(), "unmute Other mic", "quitting restores the microphone");
+    }
+
     #[test]
     fn reports_stop_all_device_change_and_restart() {
         let (mut p, _) = player();
-        for stop in [SoundCmd::StopAll, SoundCmd::SetDevices { me: "".into(), mic: "none".into() }] {
+        for stop in [SoundCmd::StopAll, SoundCmd::SetDevices { me: "".into(), mic: "none".into(), mute_mic: "".into() }] {
             p.handle(press(Mode::Restart));
             assert_eq!(p.poll(), vec![(A.into(), true)]);
             p.handle(press(Mode::Restart));

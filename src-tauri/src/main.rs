@@ -295,6 +295,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 
 fn main() {
     init_logging(&data_dir());
+    gerzys_deck::mic_mute::restore_after_crash(&data_dir());
     let hidden = std::env::args().any(|a| a == "--hidden");
     log::info!("Gerzy's deck starting (hidden={hidden})");
 
@@ -347,6 +348,7 @@ fn main() {
             commands::set_config,
             commands::import_sound,
             commands::list_audio_outputs,
+            commands::list_audio_inputs,
             commands::auto_mic_device,
             commands::preview_sound,
             commands::stop_sounds,
