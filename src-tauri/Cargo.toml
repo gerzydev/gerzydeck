@@ -42,6 +42,8 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 resvg = "0.50"
 rodio = { version = "0.20", default-features = false, features = ["symphonia-mp3", "symphonia-wav", "symphonia-flac", "vorbis"] }
+# decoding that skips damaged frames (same version and codecs as rodio uses)
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "wav", "flac", "pcm"] }
 nvml-wrapper = "0.13.0"
 
 [dependencies.windows]

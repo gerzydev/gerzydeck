@@ -49,7 +49,7 @@ pub fn import(data_dir: &Path, bytes: &[u8]) -> Result<String, String> {
     }
     let unsupported = || tr("Tenhle formát neumím přehrát. Použij MP3, WAV, OGG nebo FLAC.", "Can't play this format. Use MP3, WAV, OGG or FLAC.").to_string();
     let ext = sniff(bytes).ok_or_else(unsupported)?;
-    rodio::Decoder::new(std::io::Cursor::new(bytes.to_vec())).map_err(|_| unsupported())?;
+    crate::sound_decode::open(std::io::Cursor::new(bytes.to_vec()), ext).map_err(|_| unsupported())?;
     let hash = Sha256::digest(bytes);
     let id = format!("{}.{ext}", hash[..8].iter().map(|b| format!("{b:02x}")).collect::<String>());
     let dir = sounds_dir(data_dir);
@@ -229,7 +229,8 @@ impl Rodio {
             *out = open(&want);
         }
         let file = std::fs::File::open(path).ok()?;
-        let source = rodio::Decoder::new(std::io::BufReader::new(file)).map_err(|e| log::warn!("cannot decode {}: {e}", path.display())).ok()?;
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        let source = crate::sound_decode::open(file, ext).map_err(|e| log::warn!("cannot decode {}: {e}", path.display())).ok()?;
         let sink = match rodio::Sink::try_new(&out.as_ref()?.handle) {
             Ok(s) => s,
             Err(_) => {

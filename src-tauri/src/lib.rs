@@ -18,6 +18,7 @@ pub mod icon_commands;
 pub mod usage;
 pub mod i18n;
 pub mod sound;
+mod sound_decode;
 pub mod gpu;
 pub mod rtss;
 pub mod afterburner;
