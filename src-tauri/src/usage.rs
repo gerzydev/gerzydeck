@@ -22,8 +22,8 @@ pub const PROVIDERS: [&str; 2] = ["claude", "codex"];
 #[serde(rename_all = "camelCase")]
 pub struct Window {
     pub percent: f32,
-    /// unix seconds
-    pub resets_at: i64,
+    /// unix seconds; None when the window has no active period (nothing used in it lately)
+    pub resets_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
@@ -115,9 +115,14 @@ fn f(v: &Value) -> Option<f32> {
 }
 
 pub fn parse_claude(v: &Value) -> Result<Usage, String> {
+    // An idle window (nothing used for a while) comes as null or without "resets_at": 0 %, no countdown.
     let win = |k: &str| -> Option<Window> {
         let w = v.get(k)?;
-        Some(Window { percent: f(w.get("utilization")?)?, resets_at: parse_rfc3339(w.get("resets_at")?.as_str()?)? })
+        if w.is_null() {
+            return Some(Window { percent: 0.0, resets_at: None });
+        }
+        let resets_at = w.get("resets_at").and_then(Value::as_str).and_then(parse_rfc3339);
+        Some(Window { percent: w.get("utilization").and_then(f).unwrap_or(0.0), resets_at })
     };
     let u = Usage { session: win("five_hour"), weekly: win("seven_day") };
     if u.session.is_none() && u.weekly.is_none() {
@@ -130,7 +135,7 @@ pub fn parse_codex(v: &Value) -> Result<Usage, String> {
     let rl = v.get("rate_limit").ok_or(crate::i18n::tr("Neznámá odpověď od ChatGPT", "Unknown answer from ChatGPT"))?;
     let win = |k: &str| -> Option<Window> {
         let w = rl.get(k)?;
-        Some(Window { percent: f(w.get("used_percent")?)?, resets_at: w.get("reset_at")?.as_i64()? })
+        Some(Window { percent: f(w.get("used_percent")?)?, resets_at: Some(w.get("reset_at")?.as_i64()?) })
     };
     let u = Usage { session: win("primary_window"), weekly: win("secondary_window") };
     if u.session.is_none() && u.weekly.is_none() {
@@ -207,6 +212,26 @@ fn jwt_exp(token: &str) -> Option<i64> {
 
 // ---------- fetching ----------
 
+/// A failed fetch; `retry_after` (seconds) is set when the service asked us to slow down.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FetchError {
+    pub message: String,
+    pub rate_limited: bool,
+    pub retry_after: Option<u64>,
+}
+
+impl From<String> for FetchError {
+    fn from(message: String) -> Self {
+        Self { message, rate_limited: false, retry_after: None }
+    }
+}
+
+impl From<&str> for FetchError {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
+    }
+}
+
 async fn post_json(client: &reqwest::Client, url: &str, body: &Value) -> Result<Value, String> {
     let res = client.post(url).json(body).send().await.map_err(|_| crate::i18n::tr("Bez připojení k internetu", "No internet connection").to_string())?;
     let status = res.status();
@@ -217,28 +242,31 @@ async fn post_json(client: &reqwest::Client, url: &str, body: &Value) -> Result<
     Ok(v)
 }
 
-async fn get_json(client: &reqwest::Client, url: &str, headers: &[(&str, &str)]) -> Result<Value, reqwest::StatusCode> {
+async fn get_json(client: &reqwest::Client, url: &str, headers: &[(&str, &str)]) -> Result<Value, (reqwest::StatusCode, Option<u64>)> {
     let mut req = client.get(url).header(reqwest::header::USER_AGENT, "GerzysDeck");
     for (k, v) in headers {
         req = req.header(*k, *v);
     }
-    let res = req.send().await.map_err(|_| reqwest::StatusCode::SERVICE_UNAVAILABLE)?;
+    let res = req.send().await.map_err(|_| (reqwest::StatusCode::SERVICE_UNAVAILABLE, None))?;
     if !res.status().is_success() {
-        return Err(res.status());
+        // Retry-After in seconds (the HTTP-date form is not used by these services)
+        let retry = res.headers().get(reqwest::header::RETRY_AFTER).and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse().ok());
+        return Err((res.status(), retry));
     }
-    res.json().await.map_err(|_| reqwest::StatusCode::BAD_GATEWAY)
+    res.json().await.map_err(|_| (reqwest::StatusCode::BAD_GATEWAY, None))
 }
 
-fn http_err(s: reqwest::StatusCode) -> String {
-    match s.as_u16() {
+fn http_err((s, retry_after): (reqwest::StatusCode, Option<u64>)) -> FetchError {
+    let message = match s.as_u16() {
         401 | 403 => crate::i18n::tr("Přihlášení vypršelo – přihlas se", "Login expired, log in again").into(),
         429 => crate::i18n::tr("Moc dotazů, zkusím později", "Too many requests, retrying later").into(),
         503 => crate::i18n::tr("Bez připojení k internetu", "No internet connection").into(),
         c => format!("Chyba serveru ({c})"),
-    }
+    };
+    FetchError { message, rate_limited: s.as_u16() == 429, retry_after }
 }
 
-async fn claude(client: &reqwest::Client) -> Result<Usage, String> {
+async fn claude(client: &reqwest::Client) -> Result<Usage, FetchError> {
     let path = claude_file();
     let mut file = read_json(&path).map_err(|e| format!("{e} (Claude Code)"))?;
     if claude_needs_refresh(&file, now_s() * 1000) {
@@ -259,10 +287,10 @@ async fn claude(client: &reqwest::Client) -> Result<Usage, String> {
     let token = file["claudeAiOauth"]["accessToken"].as_str().ok_or(crate::i18n::tr("Nejsi přihlášený v Claude Code", "Not logged in to Claude Code"))?;
     let auth = format!("Bearer {token}");
     let v = get_json(client, CLAUDE_USAGE_URL, &[("Authorization", &auth), ("anthropic-beta", "oauth-2025-04-20")]).await.map_err(http_err)?;
-    parse_claude(&v)
+    Ok(parse_claude(&v)?)
 }
 
-async fn codex(client: &reqwest::Client) -> Result<Usage, String> {
+async fn codex(client: &reqwest::Client) -> Result<Usage, FetchError> {
     let path = codex_file();
     let mut file = read_json(&path).map_err(|e| format!("{e} (Codex)"))?;
     let access = file["tokens"]["access_token"].as_str().ok_or(crate::i18n::tr("Codex není přihlášený přes ChatGPT", "Codex is not logged in with ChatGPT"))?;
@@ -282,14 +310,60 @@ async fn codex(client: &reqwest::Client) -> Result<Usage, String> {
     let account = file["tokens"]["account_id"].as_str().unwrap_or_default();
     let auth = format!("Bearer {token}");
     let v = get_json(client, CODEX_USAGE_URL, &[("Authorization", &auth), ("ChatGPT-Account-Id", account)]).await.map_err(http_err)?;
-    parse_codex(&v)
+    Ok(parse_codex(&v)?)
 }
 
-pub async fn fetch(client: &reqwest::Client, provider: &str) -> Result<Usage, String> {
+pub async fn fetch(client: &reqwest::Client, provider: &str) -> Result<Usage, FetchError> {
     match provider {
         "claude" => claude(client).await,
         "codex" => codex(client).await,
         _ => Err(crate::i18n::tr("Neznámá služba", "Unknown service").into()),
+    }
+}
+
+/// Seconds between regular refreshes: Claude's usage endpoint is strict about request rates.
+pub fn interval_s(provider: &str) -> u64 {
+    if provider == "claude" { 300 } else { 60 }
+}
+
+/// When to ask a service again: on schedule, sooner after a key press, much later after "too many requests".
+#[derive(Debug, Default)]
+pub struct Schedule {
+    next: std::collections::HashMap<String, u64>,
+    backoff: std::collections::HashMap<String, u64>,
+    limited_until: std::collections::HashMap<String, u64>,
+    last_try: std::collections::HashMap<String, u64>,
+}
+
+impl Schedule {
+    /// Whether `provider` should be fetched at `now` (seconds); `pressed` = a key asked for fresh numbers.
+    pub fn due(&self, provider: &str, now: u64, pressed: bool) -> bool {
+        if self.limited_until.get(provider).is_some_and(|&t| now < t) {
+            return false;
+        }
+        let recent = self.last_try.get(provider).is_some_and(|&t| now < t + 10);
+        self.next.get(provider).is_none_or(|&t| now >= t) || (pressed && !recent)
+    }
+
+    pub fn record(&mut self, provider: &str, now: u64, result: Result<(), &FetchError>) {
+        self.last_try.insert(provider.into(), now);
+        match result {
+            Err(e) if e.rate_limited => {
+                // 5 → 10 → 20 → 30 minutes, or longer if the service says so
+                let b = self.backoff.get(provider).map_or(300, |b| (b * 2).min(1800));
+                self.backoff.insert(provider.into(), b);
+                let wait = e.retry_after.unwrap_or(0).max(b);
+                self.limited_until.insert(provider.into(), now + wait);
+                self.next.insert(provider.into(), now + wait);
+            }
+            _ => {
+                if result.is_ok() {
+                    self.backoff.remove(provider);
+                }
+                self.limited_until.remove(provider);
+                self.next.insert(provider.into(), now + interval_s(provider));
+            }
+        }
     }
 }
 
@@ -307,28 +381,24 @@ pub fn spawn_poller(
                 Err(e) => return log::error!("usage poller: {e}"),
             };
             let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap_or_default();
-            let mut last = std::time::Instant::now() - Duration::from_secs(3600);
+            let mut schedule = Schedule::default();
             loop {
-                let woken = match wake.recv_timeout(Duration::from_secs(60)) {
+                let pressed = match wake.recv_timeout(Duration::from_secs(20)) {
                     Ok(()) => true,
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
                 };
-                // presses in quick succession share one request
-                if woken && last.elapsed() < Duration::from_secs(10) {
-                    continue;
-                }
-                let providers = wanted();
-                if providers.is_empty() {
-                    continue;
-                }
-                last = std::time::Instant::now();
-                for p in providers {
-                    let res = rt.block_on(fetch(&client, &p));
-                    if let Err(e) = &res {
-                        log::warn!("usage {p}: {e}");
+                let now = now_s().max(0) as u64;
+                for p in wanted() {
+                    if !schedule.due(&p, now, pressed) {
+                        continue;
                     }
-                    publish(p, res);
+                    let res = rt.block_on(fetch(&client, &p));
+                    schedule.record(&p, now, res.as_ref().map(|_| ()));
+                    if let Err(e) = &res {
+                        log::warn!("usage {p}: {}{}", e.message, e.retry_after.map(|s| format!(" (retry after {s} s)")).unwrap_or_default());
+                    }
+                    publish(p, res.map_err(|e| e.message));
                 }
             }
         })
@@ -348,8 +418,13 @@ mod tests {
             "seven_day_opus": null
         });
         let u = parse_claude(&v).unwrap();
-        assert_eq!(u.session, Some(Window { percent: 21.0, resets_at: 1_794_529_799 }));
-        assert_eq!(u.weekly, Some(Window { percent: 3.5, resets_at: 1_794_711_599 }));
+        assert_eq!(u.session, Some(Window { percent: 21.0, resets_at: Some(1_794_529_799) }));
+        assert_eq!(u.weekly, Some(Window { percent: 3.5, resets_at: Some(1_794_711_599) }));
+        // nothing used for hours: the 5-hour window is idle, shown as 0 % without a countdown
+        let idle = parse_claude(&json!({ "five_hour": null, "seven_day": { "utilization": 12, "resets_at": "2026-11-15T02:59:59+00:00" } })).unwrap();
+        assert_eq!(idle.session, Some(Window { percent: 0.0, resets_at: None }));
+        let no_reset = parse_claude(&json!({ "five_hour": { "utilization": 0, "resets_at": null }, "seven_day": null })).unwrap();
+        assert_eq!(no_reset.session, Some(Window { percent: 0.0, resets_at: None }));
         assert!(parse_claude(&json!({ "error": "x" })).is_err());
     }
 
@@ -360,8 +435,8 @@ mod tests {
             "secondary_window": { "used_percent": 26, "reset_at": 1794682925 }
         } });
         let u = parse_codex(&v).unwrap();
-        assert_eq!(u.session, Some(Window { percent: 100.0, resets_at: 1794523637 }));
-        assert_eq!(u.weekly, Some(Window { percent: 26.0, resets_at: 1794682925 }));
+        assert_eq!(u.session, Some(Window { percent: 100.0, resets_at: Some(1794523637) }));
+        assert_eq!(u.weekly, Some(Window { percent: 26.0, resets_at: Some(1794682925) }));
         assert!(parse_codex(&json!({})).is_err());
     }
 
@@ -424,5 +499,34 @@ mod tests {
         std::fs::write(&f, "{}").unwrap();
         write_json(&f, &json!({ "a": 1 })).unwrap();
         assert_eq!(read_json(&f).unwrap(), json!({ "a": 1 }));
+    }
+
+    #[test]
+    fn schedule_spaces_requests_and_backs_off_on_rate_limits() {
+        let limited = FetchError { message: "x".into(), rate_limited: true, retry_after: None };
+        let mut s = Schedule::default();
+        assert!(s.due("claude", 1000, false), "first time right away");
+        s.record("claude", 1000, Ok(()));
+        assert!(!s.due("claude", 1100, false));
+        assert!(s.due("claude", 1300, false), "every 5 minutes for Claude");
+        assert!(s.due("claude", 1100, true), "a key press asks sooner");
+        assert!(!s.due("claude", 1005, true), "but not twice within 10 s");
+        // too many requests: 5, 10, 20, 30, 30 minutes
+        let mut t = 2000;
+        for wait in [300, 600, 1200, 1800, 1800] {
+            s.record("claude", t, Err(&limited));
+            assert!(!s.due("claude", t + wait - 1, true), "a press does not break the back-off");
+            assert!(s.due("claude", t + wait, false));
+            t += wait;
+        }
+        s.record("claude", t, Ok(()));
+        s.record("claude", t + 300, Err(&limited));
+        assert!(s.due("claude", t + 600, false), "success resets the back-off");
+        // the service's own Retry-After wins when it is longer
+        s.record("codex", 0, Err(&FetchError { message: "x".into(), rate_limited: true, retry_after: Some(3600) }));
+        assert!(!s.due("codex", 3599, false) && s.due("codex", 3600, false));
+        // other errors keep the normal pace
+        s.record("codex", 5000, Err(&FetchError::from("offline")));
+        assert!(s.due("codex", 5060, false));
     }
 }

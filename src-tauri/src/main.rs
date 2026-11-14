@@ -115,10 +115,21 @@ fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
         _ => Align::Bottom,
     };
     let value = TitleParams { bold: true, size: t.size.unwrap_or(14).clamp(6, 40), align, ..TitleParams::default() };
-    let mut canvas = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &value);
-    if let Some(label) = label {
-        gerzys_deck::render::draw_key_label(&mut canvas, &label);
-    }
+    let mut canvas = if t.cover {
+        // album art edge to edge; song / artist in the same bottom strip as key labels
+        let mut c = compose_tile(t.image.as_deref(), t.bg, None, &value);
+        let text = [title.as_deref(), label.as_deref()].into_iter().flatten().map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+        if !text.is_empty() {
+            gerzys_deck::render::draw_key_label(&mut c, &text);
+        }
+        c
+    } else {
+        let mut c = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &value);
+        if let Some(label) = &label {
+            gerzys_deck::render::draw_key_label(&mut c, label);
+        }
+        c
+    };
     let mark = match t.overlay {
         Overlay::Ok => Some(("✓", [0x43, 0xc4, 0x6a])),
         Overlay::Alert => Some(("⚠", [0xf2, 0xb8, 0x4b])),
@@ -177,6 +188,22 @@ fn start_core(app: &AppHandle) -> anyhow::Result<()> {
         sound_tx: Some(sound_tx.clone()),
     });
     *engine_slot.lock().unwrap() = Some(engine_tx.clone());
+
+    // Spotify keys show an offline tile (and start Spotify on press) while the app is closed
+    let spotify_tx = engine_tx.clone();
+    std::thread::Builder::new().name("spotify-watch".into()).spawn(move || {
+        let mut last = None;
+        loop {
+            let running = os::list_process_names().iter().any(|p| p.eq_ignore_ascii_case("spotify.exe"));
+            if last != Some(running) {
+                last = Some(running);
+                if spotify_tx.send(Msg::SpotifyRunning(running)).is_err() {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(800));
+        }
+    })?;
 
     // GPU monitor keys: NVML + RTSS, read once a second while such a key is on the deck
     let gpu_tx = engine_tx.clone();

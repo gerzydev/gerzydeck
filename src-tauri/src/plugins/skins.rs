@@ -12,6 +12,8 @@ pub const ACCENT: &str = "#ff9a3c";
 pub const RED: &str = "#ff6b6b";
 pub const GREEN: &str = "#5dde89";
 pub const GREY: &str = "#6b7078";
+/// Spotify brand green (the play key while Spotify runs)
+pub const BRAND_SPOTIFY: &str = "#1db954";
 
 /// Normalises a plugin image reference: "./actions/mute_0@2x.png" → "actions/mute_0".
 fn base(image: &str) -> String {
@@ -26,6 +28,7 @@ fn badge_colors(state: &str) -> (&'static str, &'static str, &'static str) {
         RED => ("#8a2020", "#430b0b", "#d0504a"),
         GREEN => ("#1f6b3a", "#0c3119", "#4cc97a"),
         GREY => ("#3b3e43", "#1d1f22", "#6b7078"),
+        BRAND_SPOTIFY => ("#1f8f4a", "#0c4422", "#3ddc78"),
         _ => ("#8f5a19", "#4a2a08", "#d9a040"),
     }
 }
@@ -233,7 +236,6 @@ const WAVES: &str = r#"<path d="M14 9a4.5 4.5 0 0 1 0 6M17 6.5a8 8 0 0 1 0 11"/>
 const CROSS: &str = r#"<path d="M14.5 9.5l5 5M19.5 9.5l-5 5"/>"#;
 
 /// "?" badge for states the plugin doesn't know yet.
-const UNKNOWN_BADGE: &str = r##"<circle cx="104" cy="24" r="11" fill="#6b7078" stroke="#0b0c0e" stroke-width="2"/><text x="104" y="30" text-anchor="middle" font-family="Segoe UI, DM Sans, sans-serif" font-size="15" font-weight="700" fill="#101214">?</text>"##;
 
 /// Speaker with a level bar under it (volume-stack-<n>[-muted]).
 fn volume_level(level: u32, muted: bool, size: Size) -> String {
@@ -254,6 +256,16 @@ fn spotify_file(file: &str, size: Size) -> Option<String> {
         }
     }
     let (name, unknown) = name.strip_suffix("-unknown").map_or((name, false), |n| (n, true));
+    // the play / now-playing key without album art: Spotify green badge with the logo
+    if name == "context-information" {
+        let rim = badge_colors(BRAND_SPOTIFY).2;
+        let under = format!(r#"<path transform="translate(-14 58) scale(4.2)" d="{SPOTIFY_LOGO}" fill="{rim}" fill-opacity="0.10"/>"#);
+        let logo = match size {
+            Size::Key => format!(r##"<path transform="translate(50 34) scale(1.84)" d="{SPOTIFY_LOGO}" fill="#ffffff"/>"##),
+            Size::List => format!(r##"<path transform="translate(36 36) scale(3)" d="{SPOTIFY_LOGO}" fill="#ffffff"/>"##),
+        };
+        return Some(badge_tile(BRAND_SPOTIFY, "", size, if size == Size::Key { &under } else { "" }, &logo));
+    }
     let repeat_one = format!("{REPEAT}{ONE}");
     let vol_up = format!(r#"{SPEAKER_BODY}<path d="M14.5 12h6M17.5 9v6"/>"#);
     let vol_down = format!(r#"{SPEAKER_BODY}<path d="M14.5 12h6"/>"#);
@@ -306,10 +318,53 @@ fn spotify_file(file: &str, size: Size) -> Option<String> {
         "local" => (FOLDER, ACCENT, false),
         _ => return None,
     };
-    let state = if unknown { GREY } else { color };
+    // "unknown" only means the plugin has nothing to show yet (Spotify closed is drawn by the engine)
+    let _ = unknown;
+    let state = color;
     // a filled shape (liked heart) keeps the white outline over a translucent white fill
     let g = if filled { g.replace("<path ", r##"<path fill="#ffffff" fill-opacity="0.35" "##) } else { g.to_string() };
-    Some(badge_tile(state, &g, size, "", if unknown { UNKNOWN_BADGE } else { "" }))
+    Some(badge_tile(state, &g, size, "", ""))
+}
+
+/// Spotify logo (path data from Simple Icons, CC0; the logo is a trademark of Spotify AB).
+const SPOTIFY_LOGO: &str = "M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z";
+
+/// Every Spotify key while the Spotify app is not running: dimmed badge with the logo, a faint
+/// logo on the key face and "OFFLINE" underneath. Pressing such a key starts Spotify.
+pub fn spotify_offline_svg() -> String {
+    let (top, bottom, rim) = badge_colors(ACCENT);
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><defs>
+<linearGradient id="k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b1d21"/><stop offset="1" stop-color="#0b0c0e"/></linearGradient>
+<linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/></linearGradient>
+<filter id="s" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4"/></filter></defs>
+<rect width="144" height="144" fill="url(#k)"/>
+<path transform="translate(-14 58) scale(4.2)" d="{SPOTIFY_LOGO}" fill="{rim}" fill-opacity="0.10"/>
+<g opacity="0.55"><rect x="38" y="26" width="68" height="68" rx="11" fill="#000" opacity="0.55" filter="url(#s)"/>
+<rect x="38" y="22" width="68" height="68" rx="11" fill="url(#b)"/>
+<rect x="38" y="22" width="68" height="68" rx="11" fill="none" stroke="{rim}" stroke-width="2.5"/>
+<path transform="translate(50 34) scale(1.84)" d="{SPOTIFY_LOGO}" fill="#ffffff"/></g>
+<text x="72" y="118" text-anchor="middle" font-family="Segoe UI, DM Sans, sans-serif" font-weight="700" font-size="15" letter-spacing="1.5" fill="{rim}">OFFLINE</text>
+</svg>"##
+    )
+}
+
+/// The offline tile as pixels (rasterized once).
+pub fn spotify_offline_image() -> Option<std::sync::Arc<image::RgbaImage>> {
+    static IMG: std::sync::OnceLock<Option<std::sync::Arc<image::RgbaImage>>> = std::sync::OnceLock::new();
+    IMG.get_or_init(|| super::image::decode_plugin_image(&data_url(&spotify_offline_svg()), None).map(std::sync::Arc::new)).clone()
+}
+
+/// Plugin keys where a long press skips to the next track (a short press stays the plugin's own action).
+pub fn long_press_next(plugin: &str, action: &str) -> bool {
+    plugin == "com.ntanis.essentials-for-spotify"
+        && (action.ends_with(".context-information-button") || action.ends_with(".playback-control-button") || action.ends_with(".play-pause-button"))
+}
+
+/// The program a plugin's keys depend on, as a process name; while it is not running the keys
+/// show an offline tile and a press starts it (`launch`).
+pub fn companion_app(plugin: &str) -> Option<(&'static str, &'static str)> {
+    (plugin == "com.ntanis.essentials-for-spotify").then_some(("spotify.exe", "spotify:"))
 }
 
 // ---------- public API ----------
@@ -347,6 +402,11 @@ pub fn plugin_icon_svg(plugin: &str) -> Option<String> {
 }
 
 /// Where the live title goes on a skinned key when the manifest doesn't say (under the badge).
+/// Plugins whose pictures without a skin are covers (album art) shown edge to edge.
+pub fn shows_covers(plugin: &str) -> bool {
+    plugin == "com.ntanis.essentials-for-spotify"
+}
+
 pub fn title_align(action: &str) -> Option<&'static str> {
     action.starts_with("me.amankhanna.oasystem.").then_some("bottom")
 }

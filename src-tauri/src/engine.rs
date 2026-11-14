@@ -49,6 +49,10 @@ pub const DEVICE_ID: &str = "D6-main";
 /// Minimum gap between two plugin-driven frames of one key (≤ 10 fps).
 const PLUGIN_FRAME_GAP: Duration = Duration::from_millis(100);
 const OVERLAY_TIME: Duration = Duration::from_millis(1500);
+/// holding a Spotify play key this long skips to the next track
+const LONG_PRESS: Duration = Duration::from_millis(500);
+/// AI usage numbers older than this show the reason they could not be refreshed
+const STALE_USAGE_S: i64 = 30 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Overlay {
@@ -75,6 +79,9 @@ pub struct PluginTile {
     /// manifest font size (SDK points)
     pub size: Option<u32>,
     pub show_title: bool,
+    /// the image is a picture sent by the plugin (album art): drawn edge to edge, the live title
+    /// goes into the label strip at the bottom
+    pub cover: bool,
 }
 
 struct PluginImage {
@@ -122,6 +129,8 @@ pub enum Msg {
     UsageWanted(Sender<Vec<String>>),
     /// a fresh sample from the GPU poller
     Gpu(crate::gpu::GpuStats),
+    /// whether Spotify is running (offline tiles on the Spotify plugin keys otherwise)
+    SpotifyRunning(bool),
     Plugin(PluginEvent),
     SoundPlaying { sound: String, playing: bool },
     /// drag & drop in the editor: swap two keys of a profile (content, action, plugin settings)
@@ -192,6 +201,9 @@ struct Engine {
     sound_tx: Option<Sender<crate::sound::SoundCmd>>,
     held_sounds: HashMap<u8, String>,
     usage: HashMap<String, Result<crate::usage::Usage, String>>,
+    /// when each provider last answered with numbers (unix s) and its latest error
+    usage_ok_at: HashMap<String, i64>,
+    usage_error: HashMap<String, String>,
     host_tx: Option<Sender<HostCmd>>,
     /// action instances the host was told are visible (context → instance)
     visible: HashMap<String, KeyCtx>,
@@ -205,6 +217,10 @@ struct Engine {
     user_images: HashMap<String, Arc<RgbaImage>>,
     themed_images: HashMap<[u8; 32], Arc<RgbaImage>>,
     render_gpu: fn(&crate::gpu::GpuTile) -> Vec<u8>,
+    /// the Spotify app runs (true until the process watcher says otherwise)
+    spotify_running: bool,
+    /// Spotify play keys being held: the plugin gets the press only on a short release
+    held_plugin_keys: HashMap<u8, (KeyCtx, Instant, bool)>,
     /// last GPU samples, newest last, for the graphs on GPU keys
     gpu_history: std::collections::VecDeque<crate::gpu::GpuStats>,
     /// metric a GPU key shows after presses (context → metric); not saved
@@ -241,6 +257,8 @@ impl Engine {
             sound_tx: d.sound_tx,
             held_sounds: HashMap::new(),
             usage: HashMap::new(),
+            usage_ok_at: HashMap::new(),
+            usage_error: HashMap::new(),
             host_tx: d.host_tx,
             visible: HashMap::new(),
             sent_titles: HashMap::new(),
@@ -251,6 +269,8 @@ impl Engine {
             user_images: HashMap::new(),
             themed_images: HashMap::new(),
             render_gpu: crate::render::render_gpu_jpeg,
+            spotify_running: true,
+            held_plugin_keys: HashMap::new(),
             gpu_history: std::collections::VecDeque::new(),
             gpu_metrics: HashMap::new(),
         };
@@ -411,6 +431,20 @@ impl Engine {
         img
     }
 
+    /// The plugin's companion program (Spotify) is known to be closed.
+    fn companion_offline(&self, plugin: &str) -> bool {
+        crate::plugins::skins::companion_app(plugin).is_some() && !self.spotify_running
+    }
+
+    /// A picture the plugin sent itself (no skin, e.g. Spotify album art) for plugins that show covers.
+    fn cover_image(&self, plugin: &str, context: &str, state: u8) -> Option<Arc<RgbaImage>> {
+        if !crate::plugins::skins::shows_covers(plugin) {
+            return None;
+        }
+        let source = self.views.get(context).and_then(|v| PluginView::pick(&v.images, state))?;
+        source.skin.is_none().then(|| source.original.clone())
+    }
+
     fn plugin_image(&mut self, context: &str, state: u8, unified: bool) -> Option<Arc<RgbaImage>> {
         let source = self.views.get(context).and_then(|v| PluginView::pick(&v.images, state));
         if !unified { return source.map(|s| s.original.clone()); }
@@ -475,7 +509,8 @@ impl Engine {
             let sound_playing = matches!(&cfg.action, Action::Sound { sound, mode, .. } if mode != "stopAll" && self.state.playing_sounds.contains(sound));
             let sig = match &plugin {
                 Some((p, state)) => format!(
-                    "P|{}|{:?}|{}|{}|{}|{:?}|{}|{:?}|{}|{}",
+                    "P|{}|{}|{:?}|{}|{}|{}|{:?}|{}|{:?}|{}|{}",
+                    self.companion_offline(p),
                     self.views.get(&context).map_or(0, |v| v.gen),
                     cfg.image,
                     state,
@@ -496,8 +531,12 @@ impl Engine {
                         self.frame_pending = true;
                         continue;
                     }
-                    let own = cfg.image.as_deref().and_then(|id| self.user_image(id));
-                    let image = own.or_else(|| self.plugin_image(&context, *state, unified));
+                    let offline = self.companion_offline(p);
+                    let own = if offline { crate::plugins::skins::spotify_offline_image() } else { cfg.image.as_deref().and_then(|id| self.user_image(id)) };
+                    // album art and similar pictures stay untouched, the plugin's own icons get the app look
+                    let cover = own.is_none().then(|| self.cover_image(p, &context, *state)).flatten();
+                    let is_cover = cover.is_some();
+                    let image = own.or(cover).or_else(|| self.plugin_image(&context, *state, unified));
                     let view = self.views.get(&context);
                     let style = view.and_then(|v| v.styles.get(*state as usize).or_else(|| v.styles.first())).cloned().unwrap_or_default();
                     let tile = PluginTile {
@@ -510,11 +549,12 @@ impl Engine {
                         show_title: style.show.unwrap_or(true),
                         // the user's own image replaces the plugin image, the live title stays
                         image,
-                        title: view.and_then(|v| PluginView::pick(&v.titles, *state)),
+                        title: view.and_then(|v| PluginView::pick(&v.titles, *state)).filter(|_| !offline),
                         label: (!cfg.label.is_empty()).then(|| cfg.label.clone()),
                         bg: parse_hex(&cfg.bg),
                         overlay,
                         missing: self.missing_plugins.contains(p),
+                        cover: is_cover,
                     };
                     self.last_frame.insert(k, now);
                     (self.render_plugin)(&tile)
@@ -545,7 +585,12 @@ impl Engine {
             Some(Ok(u)) => {
                 if let Some(w) = if window == "weekly" { u.weekly } else { u.session } {
                     tile.percent = Some(w.percent);
-                    tile.reset = Some(crate::usage::reset_text(crate::usage::now_s(), w.resets_at));
+                    tile.reset = w.resets_at.map(|at| crate::usage::reset_text(crate::usage::now_s(), at));
+                    // the last good numbers are kept through short outages; after half an hour say why they are old
+                    let ok_at = self.usage_ok_at.get(provider).copied().unwrap_or(0);
+                    if crate::usage::now_s() - ok_at > STALE_USAGE_S {
+                        tile.error = self.usage_error.get(provider).cloned();
+                    }
                 }
             }
             Some(Err(e)) => tile.error = Some(e.clone()),
@@ -673,6 +718,15 @@ impl Engine {
 
     fn on_tick(&mut self) {
         let now = Instant::now();
+        let due: Vec<u8> = self.held_plugin_keys.iter().filter(|(_, (_, t, fired))| !fired && now.duration_since(*t) >= LONG_PRESS).map(|(k, _)| *k).collect();
+        for key in due {
+            // next track through the system media key, which Spotify follows
+            let _ = self.runner.press(key, &Action::Media { command: "next".into() });
+            self.runner.release(key);
+            if let Some(h) = self.held_plugin_keys.get_mut(&key) {
+                h.2 = true;
+            }
+        }
         let mut expired = false;
         for v in self.views.values_mut() {
             if v.overlay.is_some_and(|(_, until)| until <= now) {
@@ -703,11 +757,31 @@ impl Engine {
         self.sink.key(key, pressed);
         // Release the sound captured at key-down, even after a profile/action change.
         if !pressed { self.release_sound(key); self.runner.release(key); }
+        // a held Spotify play key: short → the plugin's own action, long → already skipped in on_tick
+        if !pressed {
+            if let Some((kc, _, fired)) = self.held_plugin_keys.remove(&key) {
+                if !fired {
+                    self.host(HostCmd::KeyDown(kc.clone()));
+                    self.host(HostCmd::KeyUp(kc));
+                }
+                return;
+            }
+        }
         if self.state.calibrating {
             return;
         }
         let context = context_for(&self.active().id, key);
         if let Some(kc) = self.visible.get(&context).cloned() {
+            if let Some((_, launch)) = crate::plugins::skins::companion_app(&kc.plugin).filter(|_| self.companion_offline(&kc.plugin)) {
+                if pressed {
+                    let _ = self.runner.press(key, &Action::Launch { target: launch.into(), args: vec![] });
+                }
+                return;
+            }
+            if pressed && crate::plugins::skins::long_press_next(&kc.plugin, &kc.ctx.action) {
+                self.held_plugin_keys.insert(key, (kc, Instant::now(), false));
+                return;
+            }
             self.host(if pressed { HostCmd::KeyDown(kc) } else { HostCmd::KeyUp(kc) });
             return;
         }
@@ -910,6 +984,15 @@ impl Engine {
                 }
             }
             Msg::Usage { provider, result } => {
+                match &result {
+                    Ok(_) => {
+                        self.usage_ok_at.insert(provider.clone(), crate::usage::now_s());
+                        self.usage_error.remove(&provider);
+                    }
+                    Err(e) => {
+                        self.usage_error.insert(provider.clone(), e.clone());
+                    }
+                }
                 // keep showing the last numbers when a refresh fails for network reasons
                 let keep = matches!((&result, self.usage.get(&provider)), (Err(e), Some(Ok(_))) if e.contains("internet") || e.contains("dotaz") || e.contains("requests"));
                 if !keep {
@@ -922,6 +1005,12 @@ impl Engine {
                     self.sink.state(&self.state);
                 }
                 self.render_active();
+            }
+            Msg::SpotifyRunning(running) => {
+                if running != self.spotify_running {
+                    self.spotify_running = running;
+                    self.render_active();
+                }
             }
             Msg::Gpu(stats) => {
                 if self.gpu_history.len() >= crate::gpu::HISTORY {
@@ -1178,6 +1267,37 @@ mod tests {
     fn look_images(rx: &Receiver<DeviceCmd>) -> Vec<serde_json::Value> {
         rx.try_iter().flat_map(|c| match c { DeviceCmd::SetImages(v) => v, _ => vec![] })
             .filter(|(k, _)| *k == 3).map(|(_, b)| serde_json::from_slice(&b).unwrap()).collect()
+    }
+
+    #[test]
+    fn spotify_offline_tile_and_press_starts_spotify() {
+        assert!(crate::plugins::skins::spotify_offline_image().is_some());
+        assert!(crate::plugins::skins::spotify_offline_svg().contains("OFFLINE"));
+        assert_eq!(crate::plugins::skins::companion_app("com.ntanis.essentials-for-spotify"), Some(("spotify.exe", "spotify:")));
+        assert_eq!(crate::plugins::skins::companion_app("me.amankhanna.oadiscord"), None);
+        let (mut e, _) = look_engine();
+        assert!(!e.companion_offline("com.ntanis.essentials-for-spotify"), "online until the watcher says otherwise");
+        e.handle(Msg::SpotifyRunning(false));
+        assert!(e.companion_offline("com.ntanis.essentials-for-spotify"));
+        assert!(!e.companion_offline("me.amankhanna.oasystem"));
+        assert!(crate::plugins::skins::long_press_next("com.ntanis.essentials-for-spotify", "com.ntanis.essentials-for-spotify.context-information-button"));
+        assert!(!crate::plugins::skins::long_press_next("com.ntanis.essentials-for-spotify", "com.ntanis.essentials-for-spotify.like-button"));
+    }
+
+    #[test]
+    fn spotify_pictures_without_a_skin_are_covers_its_icons_are_not() {
+        use image::Rgba;
+        let (mut e, _) = look_engine();
+        let art = Arc::new(RgbaImage::from_pixel(8, 8, Rgba([200, 30, 90, 255])));
+        let skin = Arc::new(RgbaImage::from_pixel(144, 144, Rgba([150, 90, 25, 255])));
+        // album art: sent as a picture, no skin → cover
+        e.on_plugin(PluginEvent::SetImage { context: "A:3".into(), image: Some(art.clone()), skin: None, state: Some(0) });
+        assert!(Arc::ptr_eq(&e.cover_image("com.ntanis.essentials-for-spotify", "A:3", 0).unwrap(), &art));
+        assert!(e.cover_image("me.amankhanna.oasystem", "A:3", 0).is_none(), "other plugins keep the generic theme");
+        // nothing playing: the plugin's own state icon has a skin → no cover, the skin is used
+        e.on_plugin(PluginEvent::SetImage { context: "A:3".into(), image: Some(art.clone()), skin: Some(skin.clone()), state: Some(0) });
+        assert!(e.cover_image("com.ntanis.essentials-for-spotify", "A:3", 0).is_none());
+        assert!(Arc::ptr_eq(&e.plugin_image("A:3", 0, true).unwrap(), &skin));
     }
 
     #[test]

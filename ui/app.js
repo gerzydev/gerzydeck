@@ -274,7 +274,7 @@ function usagePreview(cfg) {
     box.append(
       h('span', { class: 'u-pct', style: `color:${color}` }, `${Math.round(w.percent)} %`),
       h('span', { class: 'u-bar' }, h('span', { style: `width:${Math.min(100, Math.max(0, w.percent))}%;background:${color}` })),
-      h('span', { class: 'u-reset' }, t("in {0}", resetText(w.resetsAt))));
+      w.resetsAt ? h('span', { class: 'u-reset' }, t("in {0}", resetText(w.resetsAt))) : null);
   }
   return box;
 }
