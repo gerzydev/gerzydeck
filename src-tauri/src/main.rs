@@ -115,10 +115,21 @@ fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
         _ => Align::Bottom,
     };
     let value = TitleParams { bold: true, size: t.size.unwrap_or(14).clamp(6, 40), align, ..TitleParams::default() };
-    let mut canvas = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &value);
-    if let Some(label) = label {
-        gerzys_deck::render::draw_key_label(&mut canvas, &label);
-    }
+    let mut canvas = if t.cover {
+        // album art edge to edge; song / artist in the same bottom strip as key labels
+        let mut c = compose_tile(t.image.as_deref(), t.bg, None, &value);
+        let text = [title.as_deref(), label.as_deref()].into_iter().flatten().map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+        if !text.is_empty() {
+            gerzys_deck::render::draw_key_label(&mut c, &text);
+        }
+        c
+    } else {
+        let mut c = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &value);
+        if let Some(label) = &label {
+            gerzys_deck::render::draw_key_label(&mut c, label);
+        }
+        c
+    };
     let mark = match t.overlay {
         Overlay::Ok => Some(("✓", [0x43, 0xc4, 0x6a])),
         Overlay::Alert => Some(("⚠", [0xf2, 0xb8, 0x4b])),

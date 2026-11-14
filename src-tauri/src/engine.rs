@@ -77,6 +77,9 @@ pub struct PluginTile {
     /// manifest font size (SDK points)
     pub size: Option<u32>,
     pub show_title: bool,
+    /// the image is a picture sent by the plugin (album art): drawn edge to edge, the live title
+    /// goes into the label strip at the bottom
+    pub cover: bool,
 }
 
 struct PluginImage {
@@ -418,6 +421,15 @@ impl Engine {
         img
     }
 
+    /// A picture the plugin sent itself (no skin, e.g. Spotify album art) for plugins that show covers.
+    fn cover_image(&self, plugin: &str, context: &str, state: u8) -> Option<Arc<RgbaImage>> {
+        if !crate::plugins::skins::shows_covers(plugin) {
+            return None;
+        }
+        let source = self.views.get(context).and_then(|v| PluginView::pick(&v.images, state))?;
+        source.skin.is_none().then(|| source.original.clone())
+    }
+
     fn plugin_image(&mut self, context: &str, state: u8, unified: bool) -> Option<Arc<RgbaImage>> {
         let source = self.views.get(context).and_then(|v| PluginView::pick(&v.images, state));
         if !unified { return source.map(|s| s.original.clone()); }
@@ -504,7 +516,10 @@ impl Engine {
                         continue;
                     }
                     let own = cfg.image.as_deref().and_then(|id| self.user_image(id));
-                    let image = own.or_else(|| self.plugin_image(&context, *state, unified));
+                    // album art and similar pictures stay untouched, the plugin's own icons get the app look
+                    let cover = own.is_none().then(|| self.cover_image(p, &context, *state)).flatten();
+                    let is_cover = cover.is_some();
+                    let image = own.or(cover).or_else(|| self.plugin_image(&context, *state, unified));
                     let view = self.views.get(&context);
                     let style = view.and_then(|v| v.styles.get(*state as usize).or_else(|| v.styles.first())).cloned().unwrap_or_default();
                     let tile = PluginTile {
@@ -522,6 +537,7 @@ impl Engine {
                         bg: parse_hex(&cfg.bg),
                         overlay,
                         missing: self.missing_plugins.contains(p),
+                        cover: is_cover,
                     };
                     self.last_frame.insert(k, now);
                     (self.render_plugin)(&tile)
@@ -1199,6 +1215,22 @@ mod tests {
     fn look_images(rx: &Receiver<DeviceCmd>) -> Vec<serde_json::Value> {
         rx.try_iter().flat_map(|c| match c { DeviceCmd::SetImages(v) => v, _ => vec![] })
             .filter(|(k, _)| *k == 3).map(|(_, b)| serde_json::from_slice(&b).unwrap()).collect()
+    }
+
+    #[test]
+    fn spotify_pictures_without_a_skin_are_covers_its_icons_are_not() {
+        use image::Rgba;
+        let (mut e, _) = look_engine();
+        let art = Arc::new(RgbaImage::from_pixel(8, 8, Rgba([200, 30, 90, 255])));
+        let skin = Arc::new(RgbaImage::from_pixel(144, 144, Rgba([150, 90, 25, 255])));
+        // album art: sent as a picture, no skin → cover
+        e.on_plugin(PluginEvent::SetImage { context: "A:3".into(), image: Some(art.clone()), skin: None, state: Some(0) });
+        assert!(Arc::ptr_eq(&e.cover_image("com.ntanis.essentials-for-spotify", "A:3", 0).unwrap(), &art));
+        assert!(e.cover_image("me.amankhanna.oasystem", "A:3", 0).is_none(), "other plugins keep the generic theme");
+        // nothing playing: the plugin's own state icon has a skin → no cover, the skin is used
+        e.on_plugin(PluginEvent::SetImage { context: "A:3".into(), image: Some(art.clone()), skin: Some(skin.clone()), state: Some(0) });
+        assert!(e.cover_image("com.ntanis.essentials-for-spotify", "A:3", 0).is_none());
+        assert!(Arc::ptr_eq(&e.plugin_image("A:3", 0, true).unwrap(), &skin));
     }
 
     #[test]

@@ -347,6 +347,11 @@ pub fn plugin_icon_svg(plugin: &str) -> Option<String> {
 }
 
 /// Where the live title goes on a skinned key when the manifest doesn't say (under the badge).
+/// Plugins whose pictures without a skin are covers (album art) shown edge to edge.
+pub fn shows_covers(plugin: &str) -> bool {
+    plugin == "com.ntanis.essentials-for-spotify"
+}
+
 pub fn title_align(action: &str) -> Option<&'static str> {
     action.starts_with("me.amankhanna.oasystem.").then_some("bottom")
 }
