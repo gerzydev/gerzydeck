@@ -285,7 +285,7 @@ impl Engine {
 
     fn send_sound_devices(&self) {
         if let Some(tx) = &self.sound_tx {
-            let _ = tx.send(crate::sound::SoundCmd::SetDevices { me: self.config.sound_me_device.clone(), mic: self.config.sound_mic_device.clone() });
+            let _ = tx.send(crate::sound::SoundCmd::SetDevices { me: self.config.sound_me_device.clone(), mic: self.config.sound_mic_device.clone(), mute_mic: self.config.sound_mute_mic.clone() });
         }
     }
 
@@ -843,7 +843,7 @@ impl Engine {
         if cfg.key_map != self.config.key_map {
             let _ = self.device_tx.send(DeviceCmd::SetKeyMap(key_map_array(&cfg.key_map)));
         }
-        let devices_changed = cfg.sound_me_device != self.config.sound_me_device || cfg.sound_mic_device != self.config.sound_mic_device;
+        let devices_changed = cfg.sound_me_device != self.config.sound_me_device || cfg.sound_mic_device != self.config.sound_mic_device || cfg.sound_mute_mic != self.config.sound_mute_mic;
         // An editor look toggle must take effect immediately, outside plugin frame throttling.
         if cfg.plugin_look != self.config.plugin_look || cfg.profiles.iter().any(|p| {
             self.config.profiles.iter().find(|old| old.id == p.id).is_some_and(|old| {
@@ -1609,7 +1609,7 @@ mod sound_tests {
                 render: |s| vec![u8::from(s.playing)], render_plugin: |_| vec![], render_usage: |_| vec![],
                 usage_wake: None, host_tx: None, sound_tx: Some(stx),
             });
-            assert_eq!(sounds.try_recv().unwrap(), SoundCmd::SetDevices { me: "".into(), mic: "auto".into() });
+            assert_eq!(sounds.try_recv().unwrap(), SoundCmd::SetDevices { me: "".into(), mic: "auto".into(), mute_mic: "".into() });
             while dev.try_recv().is_ok() {}
             Self { e, sounds, dev, states }
         }
@@ -1674,12 +1674,15 @@ mod sound_tests {
         assert!(r.commands().is_empty());
         raw["soundMeDevice"] = json!("Headphones");
         r.e.set_config(&raw).unwrap();
-        assert_eq!(r.commands(), vec![SoundCmd::SetDevices { me: "Headphones".into(), mic: "auto".into() }]);
+        assert_eq!(r.commands(), vec![SoundCmd::SetDevices { me: "Headphones".into(), mic: "auto".into(), mute_mic: "".into() }]);
         raw["soundMicDevice"] = json!("CABLE Input");
         r.e.set_config(&raw).unwrap();
-        assert_eq!(r.commands(), vec![SoundCmd::SetDevices { me: "Headphones".into(), mic: "CABLE Input".into() }]);
+        assert_eq!(r.commands(), vec![SoundCmd::SetDevices { me: "Headphones".into(), mic: "CABLE Input".into(), mute_mic: "".into() }]);
         r.e.set_config(&raw).unwrap();
         assert!(r.commands().is_empty());
+        raw["soundMuteMic"] = json!("Mic (USB)");
+        r.e.set_config(&raw).unwrap();
+        assert_eq!(r.commands(), vec![SoundCmd::SetDevices { me: "Headphones".into(), mic: "CABLE Input".into(), mute_mic: "Mic (USB)".into() }]);
     }
     #[test]
     fn playing_events_update_state_and_only_matching_tiles() {
