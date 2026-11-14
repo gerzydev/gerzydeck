@@ -357,7 +357,7 @@ fn usage_key_shows_the_window_and_refreshes_on_press() {
     p.tx.send(Msg::UsageWanted(r)).unwrap();
     assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), vec!["claude".to_string()]);
     let at = crate::usage::now_s() + 3600;
-    p.tx.send(Msg::Usage { provider: "claude".into(), result: Ok(Usage { session: Some(Window { percent: 21.0, resets_at: at }), weekly: None }) }).unwrap();
+    p.tx.send(Msg::Usage { provider: "claude".into(), result: Ok(Usage { session: Some(Window { percent: 21.0, resets_at: Some(at) }), weekly: None }) }).unwrap();
     let k6 = p.images().into_iter().filter(|(k, _)| *k == 6).last().map(|(_, s)| s);
     assert_eq!(k6.as_deref(), Some("U|Claude 5h|Some(21.0)|true|None"));
     p.tx.send(Msg::Usage { provider: "claude".into(), result: Err("Přihlášení vypršelo".into()) }).unwrap();

@@ -49,6 +49,8 @@ pub const DEVICE_ID: &str = "D6-main";
 /// Minimum gap between two plugin-driven frames of one key (≤ 10 fps).
 const PLUGIN_FRAME_GAP: Duration = Duration::from_millis(100);
 const OVERLAY_TIME: Duration = Duration::from_millis(1500);
+/// AI usage numbers older than this show the reason they could not be refreshed
+const STALE_USAGE_S: i64 = 30 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Overlay {
@@ -192,6 +194,9 @@ struct Engine {
     sound_tx: Option<Sender<crate::sound::SoundCmd>>,
     held_sounds: HashMap<u8, String>,
     usage: HashMap<String, Result<crate::usage::Usage, String>>,
+    /// when each provider last answered with numbers (unix s) and its latest error
+    usage_ok_at: HashMap<String, i64>,
+    usage_error: HashMap<String, String>,
     host_tx: Option<Sender<HostCmd>>,
     /// action instances the host was told are visible (context → instance)
     visible: HashMap<String, KeyCtx>,
@@ -241,6 +246,8 @@ impl Engine {
             sound_tx: d.sound_tx,
             held_sounds: HashMap::new(),
             usage: HashMap::new(),
+            usage_ok_at: HashMap::new(),
+            usage_error: HashMap::new(),
             host_tx: d.host_tx,
             visible: HashMap::new(),
             sent_titles: HashMap::new(),
@@ -545,7 +552,12 @@ impl Engine {
             Some(Ok(u)) => {
                 if let Some(w) = if window == "weekly" { u.weekly } else { u.session } {
                     tile.percent = Some(w.percent);
-                    tile.reset = Some(crate::usage::reset_text(crate::usage::now_s(), w.resets_at));
+                    tile.reset = w.resets_at.map(|at| crate::usage::reset_text(crate::usage::now_s(), at));
+                    // the last good numbers are kept through short outages; after half an hour say why they are old
+                    let ok_at = self.usage_ok_at.get(provider).copied().unwrap_or(0);
+                    if crate::usage::now_s() - ok_at > STALE_USAGE_S {
+                        tile.error = self.usage_error.get(provider).cloned();
+                    }
                 }
             }
             Some(Err(e)) => tile.error = Some(e.clone()),
@@ -910,6 +922,15 @@ impl Engine {
                 }
             }
             Msg::Usage { provider, result } => {
+                match &result {
+                    Ok(_) => {
+                        self.usage_ok_at.insert(provider.clone(), crate::usage::now_s());
+                        self.usage_error.remove(&provider);
+                    }
+                    Err(e) => {
+                        self.usage_error.insert(provider.clone(), e.clone());
+                    }
+                }
                 // keep showing the last numbers when a refresh fails for network reasons
                 let keep = matches!((&result, self.usage.get(&provider)), (Err(e), Some(Ok(_))) if e.contains("internet") || e.contains("dotaz") || e.contains("requests"));
                 if !keep {
