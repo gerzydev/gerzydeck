@@ -21,6 +21,8 @@ export function plural(n, one, many, csOne, csFew, csMany) {
 }
 
 const CS = {
+  "Mute microphone while playing": "Ztlumit mikrofon při přehrávání",
+  "While a soundboard sound plays, Windows mutes this microphone so others hear only the sound.": "Během zvuku ze soundboardu Windows ztlumí tenhle mikrofon, takže ostatní slyší jen zvuk.",
   "Slot {0}": "Slot {0}",
   "— none —": "— nic —",
   "Frames (PresentMon)": "Snímky (PresentMon)",

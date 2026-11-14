@@ -859,22 +859,25 @@ function renderSettings() {
 
 // Audio devices load when Settings opens; saved disconnected outputs stay selectable.
 let soundOutputs = null;
+let soundInputs = null;
 let soundAutoMic = null;
 let soundOutputsLoading = false;
 function soundboardPanel() {
-  const deviceSelect = (field, label, fallback, initial) => {
+  const deviceSelect = (field, label, fallback, initial, available = soundOutputs) => {
     const selected = config[field] ?? initial;
-    const devices = soundOutputs ?? [];
+    const devices = available ?? [];
     return h('label', { class: 'rm-field' }, h('span', { class: 'rm-label' }, label),
       h('select', { class: 'rm-select', onchange: (e) => { config[field] = e.target.value; save(); } },
         fallback.map(([v, l]) => option(v, l, selected)),
         devices.filter((d) => !fallback.some(([v]) => v === d)).map((d) => option(d, d, selected)),
-        !fallback.some(([v]) => v === selected) && !devices.includes(selected) && option(selected, soundOutputs === null ? selected : t("{0} (not connected)", selected), selected)));
+        !fallback.some(([v]) => v === selected) && !devices.includes(selected) && option(selected, available === null ? selected : t("{0} (not connected)", selected), selected)));
   };
   if (soundOutputs === null && !soundOutputsLoading) {
     soundOutputsLoading = true;
-    Promise.allSettled([invoke('list_audio_outputs'), invoke('auto_mic_device')]).then(([outputs, mic]) => {
+    Promise.allSettled([invoke('list_audio_outputs'), invoke('auto_mic_device'), invoke('list_audio_inputs')]).then(([outputs, mic, inputs]) => {
       soundOutputs = outputs.status === 'fulfilled' ? [...new Set(outputs.value)] : [];
+      soundInputs = inputs.status === 'fulfilled' ? [...new Set(inputs.value)] : [];
+      if (inputs.status === 'rejected') toast(inputs.reason);
       soundAutoMic = mic.status === 'fulfilled' ? mic.value : null;
       soundOutputsLoading = false;
       if (outputs.status === 'rejected') toast(outputs.reason);
@@ -885,7 +888,9 @@ function soundboardPanel() {
   return h('div', { class: 'rm-panel' }, h('div', { class: 'rm-panel-head' }, h('h2', {}, t("Soundboard"))),
     h('div', { class: 'rm-panel-body rm-stack' },
       deviceSelect('soundMeDevice', t("Output for you"), [['', t("Windows default")]], ''),
-      deviceSelect('soundMicDevice', t("Output into microphone"), [['auto', t("Auto ({0})", soundOutputsLoading ? t("Loading…") : soundAutoMic || t("not found"))], ['none', t("Off")]], 'auto')));
+      deviceSelect('soundMicDevice', t("Output into microphone"), [['auto', t("Auto ({0})", soundOutputsLoading ? t("Loading…") : soundAutoMic || t("not found"))], ['none', t("Off")]], 'auto'),
+      deviceSelect('soundMuteMic', t("Mute microphone while playing"), [['', t("Off")]], '', soundInputs),
+      h('span', { class: 'rm-meta' }, t("While a soundboard sound plays, Windows mutes this microphone so others hear only the sound."))));
 }
 
 // ---------- boot logo ----------
