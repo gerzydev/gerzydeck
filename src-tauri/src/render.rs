@@ -99,6 +99,102 @@ pub fn draw_key_label(canvas: &mut RgbImage, label: &str) {
     draw_label(canvas, label, true);
 }
 
+/// One line of text under a cover picture.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CaptionLine {
+    pub text: String,
+    /// a line too long for the key runs past like a ticker instead of ending with "…"
+    pub scroll: bool,
+}
+
+const CAPTION_SCALE: f32 = 15.0;
+const CAPTION_MARGIN: i32 = 5;
+/// ticker: pause at the start of each round, then a fixed step every frame (even steps look
+/// smooth, time-based ones jitter), and the space before the text comes round again
+const TICKER_HOLD_MS: u64 = 1500;
+pub const TICKER_FRAME_MS: u64 = 120;
+/// a new song name runs past this many times, then stays still and ends with "…"
+const TICKER_ROUNDS: u64 = 2;
+const TICKER_STEP: i32 = 2;
+const TICKER_GAP: i32 = 28;
+/// JPEG quality of ticker frames: ~5.5 kB instead of ~8 kB, so a frame takes ~60 ms of the deck
+/// link (about half of it at one frame per 120 ms, and only while the name runs)
+pub const TICKER_JPEG_QUALITY: u8 = 75;
+
+/// One round of a ticker for text `w` px wide: the pause, then steps until the text is back.
+fn ticker_round_ms(w: u32) -> u64 {
+    let steps = (w as i32 + TICKER_GAP + TICKER_STEP - 1) / TICKER_STEP;
+    TICKER_HOLD_MS + steps as u64 * TICKER_FRAME_MS
+}
+
+/// How long the caption's ticker runs (all rounds), or None when no line has to run: while it
+/// runs, the key is redrawn every frame.
+pub fn ticker_ms(lines: &[CaptionLine]) -> Option<u64> {
+    let font = font()?;
+    let width = KEY_SIZE - 2 * CAPTION_MARGIN as u32;
+    lines
+        .iter()
+        .take(3)
+        .filter(|l| l.scroll)
+        .map(|l| text_size(PxScale::from(CAPTION_SCALE), font, &l.text).0)
+        .filter(|w| *w > width)
+        .map(|w| TICKER_ROUNDS * ticker_round_ms(w))
+        .max()
+}
+
+/// Lines in the bottom strip of a cover picture (album art), on the label's dark gradient. A line
+/// that doesn't fit runs as a ticker (`phase_ms` = time since it started, for its rounds) or
+/// ends with "…".
+pub fn draw_cover_caption(canvas: &mut RgbImage, lines: &[CaptionLine], phase_ms: Option<u64>) {
+    let Some(font) = font() else {
+        log::warn!("no system font found, skipping key label");
+        return;
+    };
+    let lines = &lines[..lines.len().min(3)];
+    if lines.is_empty() {
+        return;
+    }
+    let scale = PxScale::from(CAPTION_SCALE);
+    let (margin, width) = (CAPTION_MARGIN, KEY_SIZE - 2 * CAPTION_MARGIN as u32);
+    let line_h = scale.y.ceil() as i32 + 1;
+    let top = KEY_SIZE as i32 - 6 - line_h * lines.len() as i32;
+    let strip = (top - 12).clamp(0, KEY_SIZE as i32 * 50 / 100) as u32;
+    for y in strip..KEY_SIZE {
+        let a = (y - strip) as f32 / (KEY_SIZE - strip) as f32 * 0.8;
+        for x in 0..KEY_SIZE {
+            let p = canvas.get_pixel_mut(x, y);
+            for c in 0..3 {
+                p[c] = (p[c] as f32 * (1.0 - a)) as u8;
+            }
+        }
+    }
+    for (i, line) in lines.iter().enumerate() {
+        let y = top + i as i32 * line_h;
+        let (w, _) = text_size(scale, font, &line.text);
+        if w <= width {
+            draw_text_mut(canvas, LABEL_COLOR, (KEY_SIZE as i32 - w as i32) / 2, y, scale, font, &line.text);
+        } else if let Some(phase_ms) = phase_ms.filter(|p| line.scroll && *p < TICKER_ROUNDS * ticker_round_ms(w)) {
+            let period = w as i32 + TICKER_GAP;
+            let round_ms = ticker_round_ms(w);
+            let offset = ((phase_ms % round_ms).saturating_sub(TICKER_HOLD_MS) / TICKER_FRAME_MS) as i32 * TICKER_STEP;
+            // draw on a copy and take back only the row between the margins
+            let mut row = canvas.clone();
+            for x in [margin - offset, margin - offset + period] {
+                draw_text_mut(&mut row, LABEL_COLOR, x, y, scale, font, &line.text);
+            }
+            for py in y.max(0) as u32..((y + line_h) as u32).min(KEY_SIZE) {
+                for px in margin as u32..KEY_SIZE - margin as u32 {
+                    canvas.put_pixel(px, py, *row.get_pixel(px, py));
+                }
+            }
+        } else {
+            let short = wrap_label(&line.text, font, scale, width, 1).into_iter().next().unwrap_or_default();
+            let (w, _) = text_size(scale, font, &short);
+            draw_text_mut(canvas, LABEL_COLOR, (KEY_SIZE as i32 - w as i32) / 2, y, scale, font, &short);
+        }
+    }
+}
+
 /// Word-wraps `text` into at most `max_lines` lines no wider than `width` px. Words too long
 /// for a line are split by characters; text that still doesn't fit ends with "…".
 fn wrap_label(text: &str, font: &FontVec, scale: PxScale, width: u32, max_lines: usize) -> Vec<String> {
@@ -369,16 +465,26 @@ pub fn render_gpu_jpeg(t: &crate::gpu::GpuTile) -> Vec<u8> {
 }
 
 pub fn tile_jpeg(canvas: &RgbImage) -> Vec<u8> {
+    tile_jpeg_quality(canvas, 90)
+}
+
+/// Like `tile_jpeg` with a chosen JPEG quality: frames of a running ticker go out several times
+/// a second, and smaller frames take less of the deck link (about 5 ms per 512-byte packet).
+pub fn tile_jpeg_quality(canvas: &RgbImage, quality: u8) -> Vec<u8> {
     let mut canvas = canvas.clone();
     round_corners(&mut canvas, CORNER_RADIUS);
-    encode_tile(&canvas)
+    encode_tile_quality(&canvas, quality)
 }
 
 /// 100×100 canvas as seen by the user → device JPEG (rotated 180°, baseline, JFIF).
 pub fn encode_tile(canvas: &RgbImage) -> Vec<u8> {
+    encode_tile_quality(canvas, 90)
+}
+
+fn encode_tile_quality(canvas: &RgbImage, quality: u8) -> Vec<u8> {
     let rotated = imageops::rotate180(canvas);
     let mut jpeg = Vec::new();
-    JpegEncoder::new_with_quality(&mut jpeg, 90)
+    JpegEncoder::new_with_quality(&mut jpeg, quality)
         .encode_image(&rotated)
         .expect("in-memory JPEG encode");
     clean_baseline_jpeg(&jpeg)
@@ -511,6 +617,62 @@ mod tests {
         assert!(p[0] > 200 && p[1] > 100 && p[1] < 200 && p[2] < 110, "{p:?}");
         let center = tile.get_pixel(KEY_SIZE / 2, KEY_SIZE / 2);
         assert!(center[0] < 50);
+    }
+
+    #[test]
+    #[ignore = "timing of one ticker frame; run with --nocapture"]
+    fn ticker_frame_cost() {
+        let art = image::RgbaImage::from_fn(300, 300, |x, y| image::Rgba([(x * 7 % 255) as u8, (y * 3 % 255) as u8, ((x ^ y) % 255) as u8, 255]));
+        let lines = [CaptionLine { text: "Creedence Clearwater Revival".into(), scroll: false }, CaptionLine { text: "All Along The Watchtower (Official Audio)".into(), scroll: true }];
+        let p = crate::plugins::image::TitleParams::default();
+        let t = std::time::Instant::now();
+        let mut size = 0;
+        for i in 0..50u64 {
+            let mut c = crate::plugins::image::compose_tile(Some(&art), DEFAULT_BG, None, &p);
+            draw_cover_caption(&mut c, &lines, Some(1500 + i * 80));
+            size = tile_jpeg(&c).len();
+        }
+        println!("frame {:?}, jpeg {size} B", t.elapsed() / 50);
+        let mut c = crate::plugins::image::compose_tile(Some(&art), DEFAULT_BG, None, &p);
+        draw_cover_caption(&mut c, &lines, Some(1500));
+        for q in [90, 80, 75, 70, 60] {
+            println!("q{q}: {} B", tile_jpeg_quality(&c, q).len());
+        }
+    }
+
+    #[test]
+    fn long_song_names_run_smoothly_short_ones_and_artists_stay_still() {
+        if font().is_none() {
+            return;
+        }
+        let line = |t: &str, scroll| CaptionLine { text: t.into(), scroll };
+        let draw = |lines: &[CaptionLine], phase: u64| {
+            let mut c = RgbImage::from_pixel(KEY_SIZE, KEY_SIZE, Rgb([90, 90, 90]));
+            draw_cover_caption(&mut c, lines, Some(phase));
+            c
+        };
+        let long = [line("Creedence Clearwater Revival", false), line("All Along The Watchtower (Official Audio)", true)];
+        let run = ticker_ms(&long).expect("runs");
+        // still during the pause at the start, then a few pixels per frame
+        assert_eq!(draw(&long, 0), draw(&long, TICKER_HOLD_MS));
+        assert_ne!(draw(&long, TICKER_HOLD_MS), draw(&long, TICKER_HOLD_MS + TICKER_FRAME_MS));
+        // within a frame the picture doesn't change (even steps)
+        assert_eq!(draw(&long, TICKER_HOLD_MS + TICKER_FRAME_MS), draw(&long, TICKER_HOLD_MS + 2 * TICKER_FRAME_MS - 1));
+        // the artist line (no scroll) and short names never move
+        let artist_rows = |c: &RgbImage| c.rows().skip(60).take(20).flat_map(|r| r.map(|p| p.0)).collect::<Vec<_>>();
+        assert_eq!(artist_rows(&draw(&long, 0)), artist_rows(&draw(&long, 5000)));
+        // after its rounds the name stays still, shortened with "…", like without a ticker
+        let still = |phase: Option<u64>| {
+            let mut c = RgbImage::from_pixel(KEY_SIZE, KEY_SIZE, Rgb([90, 90, 90]));
+            draw_cover_caption(&mut c, &long, phase);
+            c
+        };
+        assert_eq!(draw(&long, run), still(None));
+        assert_eq!(draw(&long, run + 10_000), still(None));
+        assert_ne!(draw(&long, run - TICKER_FRAME_MS * 5), still(None));
+        let short = [line("ABBA", false), line("SOS", true)];
+        assert_eq!(ticker_ms(&short), None);
+        assert_eq!(draw(&short, 0), draw(&short, 5000));
     }
 
     #[test]

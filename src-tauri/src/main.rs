@@ -118,10 +118,12 @@ fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
     let mut canvas = if t.cover {
         // album art edge to edge; song / artist in the same bottom strip as key labels
         let mut c = compose_tile(t.image.as_deref(), t.bg, None, &value);
-        let text = [title.as_deref(), label.as_deref()].into_iter().flatten().map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
-        if !text.is_empty() {
-            gerzys_deck::render::draw_key_label(&mut c, &text);
+        // the live title's lines, then the user label (which stands in for a missing live title)
+        let mut lines = if t.title.is_some() { t.caption.clone() } else { Vec::new() };
+        if let Some(text) = title.as_deref().filter(|_| t.title.is_none()).or(label.as_deref()) {
+            lines.push(gerzys_deck::render::CaptionLine { text: text.split_whitespace().collect::<Vec<_>>().join(" "), scroll: false });
         }
+        gerzys_deck::render::draw_cover_caption(&mut c, &lines, t.ticker.then_some(t.phase_ms));
         c
     } else {
         let mut c = compose_tile(t.image.as_deref(), t.bg, title.as_deref(), &value);
@@ -140,7 +142,11 @@ fn render_plugin_tile(t: &PluginTile) -> Vec<u8> {
         let big = TitleParams { show: true, size: 30, color, align: Align::Middle, bold: true };
         canvas = compose_tile(Some(&dimmed), t.bg, Some(glyph), &big);
     }
-    gerzys_deck::render::tile_jpeg(&canvas)
+    if t.ticker {
+        gerzys_deck::render::tile_jpeg_quality(&canvas, gerzys_deck::render::TICKER_JPEG_QUALITY)
+    } else {
+        gerzys_deck::render::tile_jpeg(&canvas)
+    }
 }
 
 fn start_core(app: &AppHandle) -> anyhow::Result<()> {

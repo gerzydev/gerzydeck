@@ -6,6 +6,7 @@
 //!
 //! Pure data: SVG strings, rasterised by `plugins::image::decode_plugin_image`.
 
+use crate::render::CaptionLine;
 use base64::{engine::general_purpose::STANDARD, Engine};
 
 pub const ACCENT: &str = "#ff9a3c";
@@ -217,7 +218,6 @@ const ONE: &str = r#"<path d="M11 10.5l1.5-1v5"/>"#;
 const HEART: &str = r#"<path d="M12 20s-8-4.6-8-10.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 8 2.5C20 15.4 12 20 12 20z"/>"#;
 const LIST_ADD: &str = r#"<path d="M3.5 6h12M3.5 11h12M3.5 16h7M18 13.5v7M14.5 17h7"/>"#;
 const LIST_MUSIC: &str = r#"<path d="M3.5 6h11M3.5 11h11M3.5 16h6"/><circle cx="16" cy="18" r="2.5"/><path d="M18.5 18V9.5l3-1"/>"#;
-const NOTE_FILE: &str = r#"<path d="M6 2.5h8l4.5 4.5v14.5H6z"/><path d="M14 2.5V7h4.5"/><circle cx="10.5" cy="16.5" r="2"/><path d="M12.5 16.5v-6l2.5 1"/>"#;
 const RADIO: &str = r#"<circle cx="12" cy="12" r="1.5"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.5 5.5a9.2 9.2 0 0 0 0 13M18.5 5.5a9.2 9.2 0 0 1 0 13"/>"#;
 const MUSIC_BOX: &str = r#"<rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="10" cy="15.5" r="2"/><path d="M12 15.5V8l4 1.5"/>"#;
 const CLIPBOARD: &str = r#"<rect x="5" y="4.5" width="14" height="17" rx="2"/><path d="M9 3h6v3H9zM12 10.5v6M9 13.5h6"/>"#;
@@ -257,7 +257,7 @@ fn spotify_file(file: &str, size: Size) -> Option<String> {
     }
     let (name, unknown) = name.strip_suffix("-unknown").map_or((name, false), |n| (n, true));
     // the play / now-playing key without album art: Spotify green badge with the logo
-    if name == "context-information" {
+    if name == "context-information" || name == "song-stack" {
         let rim = badge_colors(BRAND_SPOTIFY).2;
         let under = format!(r#"<path transform="translate(-14 58) scale(4.2)" d="{SPOTIFY_LOGO}" fill="{rim}" fill-opacity="0.10"/>"#);
         let logo = match size {
@@ -290,7 +290,6 @@ fn spotify_file(file: &str, size: Size) -> Option<String> {
         "unlike" => (HEART, GREEN, true),
         "add-to-playlist" => (LIST_ADD, ACCENT, false),
         "context-information" | "items" | "playlists" => (LIST_MUSIC, ACCENT, false),
-        "song-stack" => (NOTE_FILE, ACCENT, false),
         "play-context" => (RADIO, ACCENT, false),
         "playback-control" => (MUSIC_BOX, ACCENT, false),
         "song-clipboard" => (CLIPBOARD, ACCENT, false),
@@ -358,7 +357,10 @@ pub fn spotify_offline_image() -> Option<std::sync::Arc<image::RgbaImage>> {
 /// Plugin keys where a long press skips to the next track (a short press stays the plugin's own action).
 pub fn long_press_next(plugin: &str, action: &str) -> bool {
     plugin == "com.ntanis.essentials-for-spotify"
-        && (action.ends_with(".context-information-button") || action.ends_with(".playback-control-button") || action.ends_with(".play-pause-button"))
+        && (action.ends_with(".context-information-button")
+            || action.ends_with(".song-stack-button")
+            || action.ends_with(".playback-control-button")
+            || action.ends_with(".play-pause-button"))
 }
 
 /// The program a plugin's keys depend on, as a process name; while it is not running the keys
@@ -405,6 +407,55 @@ pub fn plugin_icon_svg(plugin: &str) -> Option<String> {
 /// Plugins whose pictures without a skin are covers (album art) shown edge to edge.
 pub fn shows_covers(plugin: &str) -> bool {
     plugin == "com.ntanis.essentials-for-spotify"
+}
+
+/// Essentials for Spotify scrolls long titles by re-sending them rotated by one character every
+/// 350 ms, with a gap of 16 spaces between the end and the start. Rotates such a line back to its
+/// start; the flag says whether the line was scrolling.
+fn unscroll(line: &str) -> (String, bool) {
+    const GAP: usize = 8;
+    let chars: Vec<char> = line.chars().collect();
+    let n = chars.len();
+    // the longest run of spaces, counted around the end (a gap can be split between both ends)
+    let (mut best, mut best_end, mut run) = (0, 0, 0);
+    for i in 0..2 * n {
+        if chars[i % n] == ' ' {
+            run += 1;
+            if run > best && run <= n {
+                (best, best_end) = (run, i % n);
+            }
+        } else {
+            run = 0;
+        }
+    }
+    let scrolling = best >= GAP && best < n;
+    let text: String = if scrolling {
+        let start = (best_end + 1) % n;
+        chars[start..].iter().chain(&chars[..start]).collect()
+    } else {
+        line.to_string()
+    };
+    (text.split_whitespace().collect::<Vec<_>>().join(" "), scrolling)
+}
+
+/// Lines under a cover picture (album art), with the plugin's scrolling undone; lines the plugin
+/// scrolls may run as a smooth ticker when they don't fit. The Spotify song key puts the artist on
+/// top, shown still, and the song name under it.
+pub fn cover_caption(action: &str, settings: &serde_json::Value, title: &str) -> Vec<CaptionLine> {
+    let mut lines: Vec<CaptionLine> = title
+        .lines()
+        .map(|raw| {
+            let (text, scroll) = unscroll(raw);
+            CaptionLine { text, scroll }
+        })
+        .filter(|l| !l.text.is_empty())
+        .collect();
+    let shows = |v: &str| settings["show"].as_array().is_some_and(|a| a.iter().any(|s| s == v));
+    if action == "com.ntanis.essentials-for-spotify.song-stack-button" && shows("name") && shows("artists") && lines.len() >= 2 {
+        lines.swap(0, 1);
+        lines[0].scroll = false;
+    }
+    lines
 }
 
 pub fn title_align(action: &str) -> Option<&'static str> {
@@ -459,6 +510,51 @@ mod tests {
         }
         assert!(skin_svg("me.amankhanna.oadiscord", "x", "data:image/svg+xml,<svg/>", false).is_none());
         assert!(skin_svg("me.amankhanna.oadiscord", "x", "actions/unknown", false).is_none());
+    }
+
+    /// Frames of the plugin's marquee: `render` (text + 16 spaces) rotated by `frame`.
+    fn marquee(text: &str, frame: usize) -> String {
+        let render: Vec<char> = format!("{text}{}", " ".repeat(16)).chars().collect();
+        render[frame..].iter().chain(&render[..frame]).collect()
+    }
+
+    #[test]
+    fn scrolling_titles_are_unscrolled() {
+        let song = "Run Through The Jungle";
+        for frame in 0..song.chars().count() + 16 {
+            assert_eq!(unscroll(&marquee(song, frame)), (song.to_string(), true), "frame {frame}");
+        }
+        // short texts are sent as they are
+        assert_eq!(unscroll("ABBA"), ("ABBA".into(), false));
+        assert_eq!(unscroll("  two  spaces  "), ("two spaces".into(), false));
+        assert_eq!(unscroll(""), (String::new(), false));
+        assert_eq!(unscroll("                ").0, "");
+    }
+
+    #[test]
+    fn the_spotify_song_key_shows_the_artist_still_over_the_scrolling_song() {
+        let (song, artist) = ("Run Through The Jungle", "Creedence Clearwater Revival");
+        let settings = serde_json::json!({ "show": ["name", "artists"] });
+        let stack = "com.ntanis.essentials-for-spotify.song-stack-button";
+        let title = format!("{}
+{}
+", marquee(song, 5), marquee(artist, 9));
+        assert_eq!(
+            cover_caption(stack, &settings, &title),
+            vec![CaptionLine { text: artist.into(), scroll: false }, CaptionLine { text: song.into(), scroll: true }]
+        );
+        let still = |t: &str| CaptionLine { text: t.into(), scroll: false };
+        assert_eq!(cover_caption(stack, &settings, "Song
+Artist
+1:02 / 3:00
+"), vec![still("Artist"), still("Song"), still("1:02 / 3:00")]);
+        // other actions and settings keep the plugin's order
+        assert_eq!(cover_caption(stack, &serde_json::json!({ "show": ["artists", "progress"] }), "Artist
+1:02
+"), vec![still("Artist"), still("1:02")]);
+        assert_eq!(cover_caption("com.ntanis.essentials-for-spotify.context-information-button", &settings, "Album
+Artist
+"), vec![still("Album"), still("Artist")]);
     }
 
     #[test]
