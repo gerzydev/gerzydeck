@@ -62,6 +62,22 @@ pub enum Overlay {
     Alert,
 }
 
+/// A caption running past on a key: its text, when it started and how long it runs. Kept after
+/// the run, so the same song name doesn't start again.
+struct Ticker {
+    caption: Vec<crate::render::CaptionLine>,
+    start: Instant,
+    run_ms: u64,
+}
+
+impl Ticker {
+    /// the frame now, or None once the run is over
+    fn frame(&self, now: Instant) -> Option<u64> {
+        let ms = now.duration_since(self.start).as_millis() as u64;
+        (ms < self.run_ms).then_some(ms / crate::render::TICKER_FRAME_MS)
+    }
+}
+
 /// Everything needed to draw a key driven by a plugin.
 #[derive(Debug, Clone, Default)]
 pub struct PluginTile {
@@ -82,6 +98,12 @@ pub struct PluginTile {
     /// the image is a picture sent by the plugin (album art): drawn edge to edge, the live title
     /// goes into the label strip at the bottom
     pub cover: bool,
+    /// lines under the cover picture (from the live title)
+    pub caption: Vec<crate::render::CaptionLine>,
+    /// how long the caption's ticker has been running
+    pub phase_ms: u64,
+    /// the caption is running as a ticker (`phase_ms` is used): frames are sent as smaller JPEGs
+    pub ticker: bool,
 }
 
 struct PluginImage {
@@ -212,6 +234,11 @@ struct Engine {
     views: HashMap<String, PluginView>,
     missing_plugins: HashSet<String>,
     last_frame: HashMap<u8, Instant>,
+    /// hash of the picture each key shows now: an identical picture is not sent again (plugins
+    /// re-send titles many times a second, e.g. Spotify's scrolling text shown still)
+    on_deck: HashMap<u8, u64>,
+    /// keys whose caption runs as a ticker (redrawn every frame) → caption and when it started
+    tickers: HashMap<u8, Ticker>,
     frame_pending: bool,
     /// decoded user images drawn under plugin titles (image id → pixels)
     user_images: HashMap<String, Arc<RgbaImage>>,
@@ -265,6 +292,8 @@ impl Engine {
             views: HashMap::new(),
             missing_plugins: HashSet::new(),
             last_frame: HashMap::new(),
+            on_deck: HashMap::new(),
+            tickers: HashMap::new(),
             frame_pending: false,
             user_images: HashMap::new(),
             themed_images: HashMap::new(),
@@ -464,7 +493,9 @@ impl Engine {
         let gpu_on_screen = (1..=15u8).any(|k| matches!(profile.key(k).action, Action::Gpu { .. }));
         crate::gpu::WANTED.store(gpu_on_screen, std::sync::atomic::Ordering::Relaxed);
         let mut images = Vec::new();
+        let mut plugin_keys = HashSet::new();
         self.frame_pending = false;
+        self.tickers.retain(|k, _| matches!(profile.key(*k).action, Action::Plugin { .. }));
         for k in 1..=15u8 {
             let cfg = profile.key(k);
             let plugin = match &cfg.action {
@@ -519,7 +550,7 @@ impl Engine {
                     overlay,
                     self.missing_plugins.contains(p),
                     cfg.title_align, self.config.plugin_look, cfg.original_look
-                ),
+                ) + &self.tickers.get(&k).map(|t| format!("|T{:?}", t.frame(now))).unwrap_or_default(),
                 None => format!("{:?}|{}|{}|{}", cfg.image, cfg.label, cfg.bg, sound_playing),
             };
             if self.rendered.get(&k) == Some(&sig) {
@@ -527,7 +558,9 @@ impl Engine {
             }
             let jpeg = match &plugin {
                 Some((p, state)) => {
-                    if self.last_frame.get(&k).is_some_and(|t| now.duration_since(*t) < PLUGIN_FRAME_GAP) {
+                    // ticker frames come at their own steady pace (the signature changes once a frame)
+                    let running = self.tickers.get(&k).is_some_and(|t| t.frame(now).is_some());
+                    if !running && self.last_frame.get(&k).is_some_and(|t| now.duration_since(*t) < PLUGIN_FRAME_GAP) {
                         self.frame_pending = true;
                         continue;
                     }
@@ -539,7 +572,7 @@ impl Engine {
                     let image = own.or(cover).or_else(|| self.plugin_image(&context, *state, unified));
                     let view = self.views.get(&context);
                     let style = view.and_then(|v| v.styles.get(*state as usize).or_else(|| v.styles.first())).cloned().unwrap_or_default();
-                    let tile = PluginTile {
+                    let mut tile = PluginTile {
                         align: cfg.title_align.clone().or(style.align).or_else(|| {
                             if !unified { return None; }
                             let Action::Plugin { action, .. } = &cfg.action else { return None };
@@ -555,8 +588,28 @@ impl Engine {
                         overlay,
                         missing: self.missing_plugins.contains(p),
                         cover: is_cover,
+                        caption: Vec::new(),
+                        phase_ms: 0,
+                        ticker: false,
                     };
+                    if let (true, Some(t), Action::Plugin { action, settings, .. }) = (is_cover, &tile.title, &cfg.action) {
+                        tile.caption = crate::plugins::skins::cover_caption(action, settings, t);
+                    }
+                    if let Some(run_ms) = crate::render::ticker_ms(&tile.caption) {
+                        // a new text (next song) starts its ticker from the beginning
+                        let start = match self.tickers.get(&k) {
+                            Some(t) if t.caption == tile.caption => t.start,
+                            _ => now,
+                        };
+                        let t = Ticker { caption: tile.caption.clone(), start, run_ms };
+                        tile.ticker = t.frame(now).is_some();
+                        tile.phase_ms = now.duration_since(start).as_millis() as u64;
+                        self.tickers.insert(k, t);
+                    } else {
+                        self.tickers.remove(&k);
+                    }
                     self.last_frame.insert(k, now);
+                    plugin_keys.insert(k);
                     (self.render_plugin)(&tile)
                 }
                 None => {
@@ -572,6 +625,14 @@ impl Engine {
             images.push((k, jpeg));
             self.rendered.insert(k, sig);
         }
+        images.retain(|(k, jpeg)| {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            jpeg.hash(&mut h);
+            let h = h.finish();
+            // only plugin tiles are skipped: other keys redraw on purpose (graphs, tests with fixed output)
+            self.on_deck.insert(*k, h) != Some(h) || !plugin_keys.contains(k)
+        });
         if !images.is_empty() {
             let _ = self.device_tx.send(DeviceCmd::SetImages(images));
         }
@@ -735,7 +796,9 @@ impl Engine {
                 expired = true;
             }
         }
-        if expired || self.frame_pending {
+        // while a ticker runs, and once more after it (the still caption)
+        let ticking = self.tickers.values().any(|t| now.checked_sub(Duration::from_millis(crate::render::TICKER_FRAME_MS * 2)).is_some_and(|then| t.frame(then).is_some()));
+        if expired || self.frame_pending || ticking {
             self.render_active();
         }
     }
@@ -927,6 +990,7 @@ impl Engine {
                 self.state.connected = true;
                 self.rendered.clear();
                 self.last_frame.clear();
+                self.on_deck.clear();
                 self.emit_state();
                 self.host(HostCmd::DeviceConnected);
                 self.sync_visible();
@@ -945,6 +1009,7 @@ impl Engine {
             Msg::Device(DeviceEvent::Redraw) => {
                 self.rendered.clear();
                 self.last_frame.clear();
+                self.on_deck.clear();
                 self.render_active();
             }
             Msg::Device(DeviceEvent::Key { key, pressed }) => self.on_key(key, pressed),
@@ -1090,7 +1155,8 @@ pub fn spawn_engine(deps: EngineDeps) -> (Sender<Msg>, JoinHandle<()>) {
     std::thread::Builder::new()
         .name("engine-tick".into())
         .spawn(move || loop {
-            std::thread::sleep(Duration::from_millis(50));
+            // fine enough for a steady ticker frame (80 ms) and long-press timing
+            std::thread::sleep(Duration::from_millis(20));
             if ticker.send(Msg::Tick).is_err() {
                 break;
             }
@@ -1281,6 +1347,7 @@ mod tests {
         assert!(e.companion_offline("com.ntanis.essentials-for-spotify"));
         assert!(!e.companion_offline("me.amankhanna.oasystem"));
         assert!(crate::plugins::skins::long_press_next("com.ntanis.essentials-for-spotify", "com.ntanis.essentials-for-spotify.context-information-button"));
+        assert!(crate::plugins::skins::long_press_next("com.ntanis.essentials-for-spotify", "com.ntanis.essentials-for-spotify.song-stack-button"));
         assert!(!crate::plugins::skins::long_press_next("com.ntanis.essentials-for-spotify", "com.ntanis.essentials-for-spotify.like-button"));
     }
 
@@ -1348,7 +1415,8 @@ mod tests {
         raw["pluginLook"] = json!(true);
         raw["profiles"][0]["keys"]["3"]["originalLook"] = json!(true);
         e.set_config(&raw).unwrap(); e.after_config_change();
-        assert_eq!(look_images(&rx)[0]["image"][0], json!([4, 4]));
+        // the deck already shows the original picture: the same picture is not sent again
+        assert!(look_images(&rx).is_empty());
         raw["profiles"][0]["keys"]["3"]["originalLook"] = json!(false);
         e.set_config(&raw).unwrap(); e.after_config_change();
         assert_eq!(look_images(&rx)[0]["image"][0], json!([144, 144]));
